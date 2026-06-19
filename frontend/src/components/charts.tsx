@@ -39,7 +39,8 @@ export function LineTrend<T extends object>({
   unit?: string;
 }) {
   return (
-    <ResponsiveContainer width="100%" height={220}>
+    <div className="h-44 sm:h-56">
+    <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
         <CartesianGrid stroke={GRID} vertical={false} />
         <XAxis dataKey="date" tickFormatter={shortDate} {...AXIS} minTickGap={24} />
@@ -55,6 +56,7 @@ export function LineTrend<T extends object>({
         />
       </LineChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -70,7 +72,8 @@ export function AreaTrend<T extends object>({
   unit?: string;
 }) {
   return (
-    <ResponsiveContainer width="100%" height={220}>
+    <div className="h-44 sm:h-56">
+    <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
         <defs>
           <linearGradient id={`g-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
@@ -92,6 +95,7 @@ export function AreaTrend<T extends object>({
         />
       </AreaChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -111,7 +115,8 @@ export function StackedBars<T extends object>({
   unit?: string;
 }) {
   return (
-    <ResponsiveContainer width="100%" height={260}>
+    <div className="h-52 sm:h-64">
+    <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
         <CartesianGrid stroke={GRID} vertical={false} />
         <XAxis dataKey="date" tickFormatter={shortDate} {...AXIS} minTickGap={24} />
@@ -130,5 +135,6 @@ export function StackedBars<T extends object>({
         ))}
       </BarChart>
     </ResponsiveContainer>
+    </div>
   );
 }

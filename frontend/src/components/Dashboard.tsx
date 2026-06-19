@@ -98,9 +98,9 @@ export default function Dashboard() {
     (summary.daily || daily.length || sleep.length || activities.length);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="mx-auto max-w-6xl px-3 py-4 pb-24 sm:px-4 sm:py-6 md:pb-6">
       {/* Header */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Garmin Dashboard</h1>
           <p className="text-sm text-white/40">
@@ -119,13 +119,13 @@ export default function Dashboard() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-2 sm:justify-start">
           <div className="flex overflow-hidden rounded-lg border border-white/10">
             {RANGES.map((r) => (
               <button
                 key={r.days}
                 onClick={() => setDays(r.days)}
-                className={`px-3 py-1.5 text-sm ${
+                className={`px-3 py-2 text-sm sm:py-1.5 ${
                   days === r.days
                     ? "bg-white/15 text-white"
                     : "text-white/50 hover:text-white"
@@ -145,8 +145,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="mb-6 flex gap-1 border-b border-white/10">
+      {/* Tabs (desktop) */}
+      <div className="mb-6 hidden gap-1 border-b border-white/10 md:flex">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -181,8 +181,81 @@ export default function Dashboard() {
           {tab === "body" && <Body body={body} />}
         </>
       )}
+
+      {/* Bottom tab bar (mobile) */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-white/10 bg-zinc-900/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            aria-label={t.label}
+            aria-current={tab === t.id ? "page" : undefined}
+            className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] ${
+              tab === t.id ? "text-blue-400" : "text-white/50"
+            }`}
+          >
+            <TabIcon id={t.id} />
+            <span className="leading-none">{t.label.split(" ")[0]}</span>
+          </button>
+        ))}
+      </nav>
     </div>
   );
+}
+
+function TabIcon({ id }: { id: Tab }) {
+  const common = {
+    width: 20,
+    height: 20,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  switch (id) {
+    case "overview":
+      return (
+        <svg {...common}>
+          <rect x="3" y="3" width="7" height="9" rx="1" />
+          <rect x="14" y="3" width="7" height="5" rx="1" />
+          <rect x="14" y="12" width="7" height="9" rx="1" />
+          <rect x="3" y="16" width="7" height="5" rx="1" />
+        </svg>
+      );
+    case "activities":
+      return (
+        <svg {...common}>
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+        </svg>
+      );
+    case "sleep":
+      return (
+        <svg {...common}>
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      );
+    case "daily":
+      return (
+        <svg {...common}>
+          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z" />
+        </svg>
+      );
+    case "body":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="5" r="2" />
+          <path d="M12 7v6m0 0-3 8m3-8 3 8M6 9l6 1 6-1" />
+        </svg>
+      );
+    case "export":
+      return (
+        <svg {...common}>
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+        </svg>
+      );
+  }
 }
 
 function EmptyState() {
@@ -259,7 +332,7 @@ function Overview({
           sub={shortDate(summary.vo2max?.date)}
         />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
         <Panel title="Steps">
           <AreaTrend data={stepsData} dataKey="steps" color="#60a5fa" />
         </Panel>
@@ -276,8 +349,8 @@ function Activities({ activities }: { activities: Activity[] }) {
     return <p className="text-white/40">No activities in this range.</p>;
   return (
     <Panel title={`Activities (${activities.length})`}>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="-mx-3 overflow-x-auto px-3 sm:mx-0 sm:px-0">
+        <table className="w-full min-w-[34rem] text-sm">
           <thead>
             <tr className="text-left text-white/40">
               <th className="py-2 pr-4 font-medium">Date</th>
@@ -324,7 +397,7 @@ function Sleep({ sleep }: { sleep: SleepRecord[] }) {
     score: s.sleep_score,
   }));
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-3 sm:gap-4">
       <Panel title="Sleep stages (hours)">
         <StackedBars
           data={data}

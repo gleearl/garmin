@@ -51,13 +51,13 @@ export function Settings({ onSave }: { onSave: () => void }) {
       <button
         onClick={() => setOpen((o) => !o)}
         title="Data source settings"
-        className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/50 hover:text-white"
+        className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-white/50 hover:text-white sm:h-8 sm:w-8"
       >
         <GearIcon />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-10 z-50 w-80 rounded-xl border border-white/10 bg-zinc-900 p-4 shadow-xl">
+        <div className="absolute right-0 top-12 z-50 w-[calc(100vw-1.5rem)] max-w-sm rounded-xl border border-white/10 bg-zinc-900 p-4 shadow-xl">
           <p className="mb-1 text-sm font-medium">
             {STATIC_MODE ? "Data folder URL" : "Backend API URL"}
           </p>

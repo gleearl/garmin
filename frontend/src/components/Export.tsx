@@ -46,7 +46,7 @@ const MONTHS = [
 ];
 
 const selectClass =
-  "rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-blue-500";
+  "w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-blue-500 sm:w-auto";
 
 export default function Export() {
   const [years, setYears] = useState<number[]>([]);
@@ -125,8 +125,8 @@ export default function Export() {
         browser from the current cache.
       </p>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs text-white/50">
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <label className="flex w-full flex-col gap-1 text-xs text-white/50 sm:w-auto">
           Year
           <select
             className={selectClass}
@@ -142,7 +142,7 @@ export default function Export() {
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-xs text-white/50">
+        <label className="flex w-full flex-col gap-1 text-xs text-white/50 sm:w-auto">
           Month
           <select
             className={selectClass}
@@ -159,7 +159,7 @@ export default function Export() {
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-xs text-white/50">
+        <label className="flex w-full flex-col gap-1 text-xs text-white/50 sm:w-auto">
           Dataset
           <select
             className={selectClass}
@@ -178,7 +178,7 @@ export default function Export() {
         <button
           onClick={handleExport}
           disabled={busy}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
+          className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50 sm:w-auto"
         >
           {busy ? "Exporting…" : "Download CSV"}
         </button>
