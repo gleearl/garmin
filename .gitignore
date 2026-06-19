@@ -5,6 +5,10 @@
 backend/garmin.db
 backend/*.db
 
+# Generated export artifacts
+backend/export/
+backend/exports/
+
 # Python
 backend/.venv/
 __pycache__/

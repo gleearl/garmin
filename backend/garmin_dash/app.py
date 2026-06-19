@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
 from .db import Activity, BodyRecord, DailyStat, SleepRecord, engine, init_db
+from .queries import latest_summary
 from .sync import run_sync
 
 app = FastAPI(title="Garmin Dashboard API")
@@ -117,30 +118,7 @@ def body(
 def summary():
     """Latest-known value for each headline metric, for the overview cards."""
     with Session(engine) as s:
-        latest_daily = s.exec(
-            select(DailyStat).order_by(DailyStat.date.desc())
-        ).first()
-        latest_sleep = s.exec(
-            select(SleepRecord).order_by(SleepRecord.date.desc())
-        ).first()
-        latest_weight = s.exec(
-            select(BodyRecord)
-            .where(BodyRecord.weight_kg.is_not(None))
-            .order_by(BodyRecord.date.desc())
-        ).first()
-        latest_vo2 = s.exec(
-            select(BodyRecord)
-            .where(BodyRecord.vo2max.is_not(None))
-            .order_by(BodyRecord.date.desc())
-        ).first()
-        n_activities = len(s.exec(select(Activity.id)).all())
-    return {
-        "daily": latest_daily,
-        "sleep": latest_sleep,
-        "weight": latest_weight,
-        "vo2max": latest_vo2,
-        "activity_count": n_activities,
-    }
+        return latest_summary(s)
 
 
 @app.post("/api/sync")

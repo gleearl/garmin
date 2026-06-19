@@ -1,22 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_API_URL, LS_KEY } from "@/lib/api";
+import { DEFAULT_DATA_URL, STATIC_MODE, LS_KEY } from "@/lib/api";
 
 export function Settings({ onSave }: { onSave: () => void }) {
   const [open, setOpen] = useState(false);
-  const [url, setUrl] = useState(DEFAULT_API_URL);
+  const [url, setUrl] = useState(DEFAULT_DATA_URL);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"ok" | "err" | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Initialise from localStorage once on mount.
   useEffect(() => {
     const stored = localStorage.getItem(LS_KEY);
     if (stored) setUrl(stored);
   }, []);
 
-  // Close on outside click.
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -36,10 +34,10 @@ export function Settings({ onSave }: { onSave: () => void }) {
   const test = async () => {
     setTesting(true);
     setTestResult(null);
+    const base = url.trim().replace(/\/$/, "");
+    const testUrl = STATIC_MODE ? `${base}/summary.json` : `${base}/api/summary`;
     try {
-      const res = await fetch(`${url.trim().replace(/\/$/, "")}/api/summary`, {
-        cache: "no-store",
-      });
+      const res = await fetch(testUrl, { cache: "no-store" });
       setTestResult(res.ok ? "ok" : "err");
     } catch {
       setTestResult("err");
@@ -52,7 +50,7 @@ export function Settings({ onSave }: { onSave: () => void }) {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        title="API settings"
+        title="Data source settings"
         className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white/50 hover:text-white"
       >
         <GearIcon />
@@ -60,11 +58,13 @@ export function Settings({ onSave }: { onSave: () => void }) {
 
       {open && (
         <div className="absolute right-0 top-10 z-50 w-80 rounded-xl border border-white/10 bg-zinc-900 p-4 shadow-xl">
-          <p className="mb-1 text-sm font-medium">Backend API URL</p>
+          <p className="mb-1 text-sm font-medium">
+            {STATIC_MODE ? "Data folder URL" : "Backend API URL"}
+          </p>
           <p className="mb-3 text-xs text-white/40">
-            When using the GitHub Pages build, enter your backend&apos;s HTTPS
-            address (e.g. a Cloudflare Tunnel or ngrok URL). Saved in
-            localStorage.
+            {STATIC_MODE
+              ? "URL of your IONOS data folder where the JSON files are hosted (e.g. https://yourdomain.com/garmin-data). Saved in localStorage."
+              : "Address of your running FastAPI backend (e.g. a Cloudflare Tunnel or ngrok URL). Saved in localStorage."}
           </p>
           <input
             className="mb-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-blue-500"
@@ -73,7 +73,7 @@ export function Settings({ onSave }: { onSave: () => void }) {
               setUrl(e.target.value);
               setTestResult(null);
             }}
-            placeholder="http://localhost:8000"
+            placeholder={STATIC_MODE ? "https://yourdomain.com/garmin-data" : "http://localhost:8000"}
             spellCheck={false}
           />
           <div className="flex items-center gap-2">

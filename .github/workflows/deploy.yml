@@ -38,8 +38,9 @@ jobs:
         run: npm run build
         working-directory: frontend
         env:
-          # Baked-in default; can be overridden at runtime via the Settings panel.
-          NEXT_PUBLIC_API_URL: http://localhost:8000
+          # Points the Pages build at the IONOS static JSON data folder.
+          # Override at runtime via the Settings panel (gear icon) if needed.
+          NEXT_PUBLIC_DATA_URL: ${{ vars.IONOS_DATA_URL }}
 
       - uses: actions/configure-pages@v4
 

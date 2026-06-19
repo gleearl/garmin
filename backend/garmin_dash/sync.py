@@ -81,9 +81,45 @@ def _upsert(session: Session, obj) -> None:
     session.merge(obj)
 
 
+def _has_data(client, d: date) -> bool:
+    """True if Garmin has any daily record for date ``d``."""
+    try:
+        s = client.get_stats(d.isoformat()) or {}
+    except Exception:  # noqa: BLE001
+        return False
+    return s.get("totalSteps") is not None or s.get("totalKilocalories") is not None
+
+
+def find_earliest_data(client, floor: date | None = None) -> date:
+    """Binary-search the earliest date with Garmin data (the account's start).
+
+    Avoids brute-forcing years of empty pre-account days. ~log2(range) requests.
+    """
+    floor = floor or date(2010, 1, 1)
+    hi = date.today()
+    lo = floor
+    if _has_data(client, lo):
+        return lo
+    while (hi - lo).days > 1:
+        mid = lo + (hi - lo) // 2
+        if _has_data(client, mid):
+            hi = mid
+        else:
+            lo = mid
+    return hi
+
+
 def sync_daily(client, session: Session, day: str) -> None:
     s = _fetch(f"daily {day}", client.get_stats, day)
     if s is None:
+        return
+    # Skip days with no real data (e.g. before the device was owned). Garmin
+    # returns a hollow record for such dates; writing it would pollute the cache.
+    if (
+        s.get("totalSteps") is None
+        and s.get("restingHeartRate") is None
+        and s.get("totalKilocalories") is None
+    ):
         return
     _upsert(
         session,
@@ -285,8 +321,12 @@ def main() -> None:
     delay = args.delay
     skip_existing = args.skip_existing
     if args.all:
-        # Garmin Connect launched in 2007; this covers any real account.
-        start = start or "2008-01-01"
+        # Auto-detect the account's earliest data instead of brute-forcing from
+        # 2008 (which wastes hours crawling empty pre-account years).
+        if not start:
+            print("Detecting earliest data date…")
+            start = find_earliest_data(get_client()).isoformat()
+            print(f"Earliest data: {start}")
         skip_existing = True
         if not delay:
             delay = 2.0

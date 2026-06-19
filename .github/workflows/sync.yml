@@ -1,0 +1,71 @@
+name: Sync Garmin data to IONOS
+
+on:
+  schedule:
+    # Every 6 hours: 00:00, 06:00, 12:00, 18:00 UTC
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install backend dependencies
+        run: uv sync
+        working-directory: backend
+
+      - name: Install lftp
+        run: sudo apt-get install -y lftp
+
+      # Download the persisted DB from IONOS so we don't lose history between runs.
+      # The || true means the first run (no DB yet) is handled gracefully.
+      - name: Download garmin.db from IONOS
+        env:
+          IONOS_PASS: ${{ secrets.IONOS_SFTP_PASSWORD }}
+        run: |
+          lftp -e "
+            set sftp:connect-program 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null';
+            open sftp://${{ secrets.IONOS_SFTP_USER }}:${IONOS_PASS}@${{ secrets.IONOS_SFTP_HOST }};
+            get garmin.db -o backend/garmin.db;
+            bye
+          " 2>/dev/null || echo "No existing DB found; starting fresh."
+
+      - name: Sync last 7 days from Garmin
+        env:
+          GARMIN_TOKEN_BASE64: ${{ secrets.GARMIN_TOKEN_BASE64 }}
+          GARMIN_DB: garmin.db
+        working-directory: backend
+        run: uv run python -m garmin_dash.sync --days 7
+
+      - name: Export static JSON
+        env:
+          GARMIN_DB: garmin.db
+          GARMIN_EXPORT_DIR: export
+        working-directory: backend
+        run: uv run python -m garmin_dash.export
+
+      # Upload JSON to the web-served folder (garmin-data, which the domain serves
+      # from), and the DB to the SFTP home root, which is NOT web-served (private).
+      - name: Upload to IONOS
+        env:
+          IONOS_PASS: ${{ secrets.IONOS_SFTP_PASSWORD }}
+        run: |
+          lftp -e "
+            set sftp:connect-program 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null';
+            open sftp://${{ secrets.IONOS_SFTP_USER }}:${IONOS_PASS}@${{ secrets.IONOS_SFTP_HOST }};
+            mput -O ${{ secrets.IONOS_DATA_PATH }} backend/export/*.json;
+            put backend/garmin.db -o garmin.db;
+            bye
+          "

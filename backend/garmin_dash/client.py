@@ -29,6 +29,26 @@ TOKENSTORE = os.path.expanduser(
 )
 
 
+def _restore_tokens_from_env() -> None:
+    """Materialize the token store from GARMIN_TOKEN_BASE64 (for CI/GitHub Actions).
+
+    The value is produced by `python -m garmin_dash.token_dump` — a base64-encoded
+    gzipped tar of the token directory. A no-op if the env var is absent.
+    """
+    b64 = os.getenv("GARMIN_TOKEN_BASE64")
+    if not b64:
+        return
+    import base64
+    import io
+    import tarfile
+    from pathlib import Path
+
+    data = base64.b64decode(b64)
+    Path(TOKENSTORE).mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        tar.extractall(TOKENSTORE)
+
+
 def _prompt_mfa() -> str:
     """Interactive MFA callback used during a fresh credential login."""
     return input("Garmin MFA one-time code: ").strip()
@@ -37,9 +57,12 @@ def _prompt_mfa() -> str:
 def resume() -> Garmin:
     """Resume an existing session from the token store.
 
+    Checks GARMIN_TOKEN_BASE64 first so CI environments (GitHub Actions) can
+    authenticate without an interactive login step.
     Raises if no valid tokens are present -- callers that need a guaranteed
     client (the API server) should surface a clear "run login first" message.
     """
+    _restore_tokens_from_env()
     garmin = Garmin()
     garmin.login(TOKENSTORE)
     return garmin

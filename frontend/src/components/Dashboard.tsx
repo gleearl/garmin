@@ -8,6 +8,7 @@ import {
   SleepRecord,
   Summary,
   api,
+  STATIC_MODE,
 } from "@/lib/api";
 import {
   fmtNum,
@@ -21,8 +22,9 @@ import {
 import { StatCard, Panel } from "./Card";
 import { AreaTrend, LineTrend, StackedBars } from "./charts";
 import { Settings } from "./Settings";
+import Export from "./Export";
 
-type Tab = "overview" | "activities" | "sleep" | "daily" | "body";
+type Tab = "overview" | "activities" | "sleep" | "daily" | "body" | "export";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -30,6 +32,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "sleep", label: "Sleep" },
   { id: "daily", label: "Daily Health" },
   { id: "body", label: "Body & Fitness" },
+  { id: "export", label: "Export" },
 ];
 
 const RANGES = [
@@ -55,7 +58,7 @@ export default function Dashboard() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [body, setBody] = useState<BodyRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -63,21 +66,23 @@ export default function Dashboard() {
     setError(null);
     const r = rangeParams(days);
     try {
-      const [s, d, sl, a, b] = await Promise.all([
+      const [s, d, sl, a, b, m] = await Promise.all([
         api.summary(),
         api.daily(r),
         api.sleep(r),
         api.activities(r),
         api.body(r),
+        api.meta(),
       ]);
       setSummary(s);
       setDaily(d);
       setSleep(sl);
       setActivities(a);
       setBody(b);
+      setLastUpdated(m.last_updated);
     } catch (e) {
       setError(
-        e instanceof Error ? e.message : "Failed to reach the API. Is it running?",
+        e instanceof Error ? e.message : "Failed to reach the data source. Check your settings.",
       );
     } finally {
       setLoading(false);
@@ -87,19 +92,6 @@ export default function Dashboard() {
   useEffect(() => {
     load();
   }, [load]);
-
-  const onSync = async () => {
-    setSyncing(true);
-    setError(null);
-    try {
-      await api.sync(days);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Sync failed");
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const hasData =
     summary &&
@@ -112,7 +104,19 @@ export default function Dashboard() {
         <div>
           <h1 className="text-2xl font-bold">Garmin Dashboard</h1>
           <p className="text-sm text-white/40">
-            Local cache · {summary?.activity_count ?? 0} activities stored
+            {summary?.activity_count ?? 0} activities
+            {lastUpdated && (
+              <>
+                {" · "}
+                {STATIC_MODE ? "synced" : "cached"}{" "}
+                {new Date(lastUpdated).toLocaleString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -131,13 +135,6 @@ export default function Dashboard() {
               </button>
             ))}
           </div>
-          <button
-            onClick={onSync}
-            disabled={syncing}
-            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
-          >
-            {syncing ? "Syncing…" : "Sync now"}
-          </button>
           <Settings onSave={load} />
         </div>
       </div>
@@ -165,10 +162,14 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {loading ? (
+      {tab === "export" ? (
+        // Export fetches its own range independently, so it works regardless of
+        // whether the currently-selected dashboard range has data.
+        <Export />
+      ) : loading ? (
         <p className="text-white/40">Loading…</p>
       ) : !hasData ? (
-        <EmptyState onSync={onSync} syncing={syncing} />
+        <EmptyState />
       ) : (
         <>
           {tab === "overview" && (
@@ -184,28 +185,23 @@ export default function Dashboard() {
   );
 }
 
-function EmptyState({
-  onSync,
-  syncing,
-}: {
-  onSync: () => void;
-  syncing: boolean;
-}) {
+function EmptyState() {
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-10 text-center">
       <p className="text-lg font-medium">No data yet</p>
-      <p className="mx-auto mt-1 max-w-md text-sm text-white/50">
-        Make sure you have logged in (
-        <code className="text-white/70">uv run python -m garmin_dash.login</code>)
-        and then pull your data.
-      </p>
-      <button
-        onClick={onSync}
-        disabled={syncing}
-        className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50"
-      >
-        {syncing ? "Syncing…" : "Sync from Garmin"}
-      </button>
+      {STATIC_MODE ? (
+        <p className="mx-auto mt-1 max-w-md text-sm text-white/50">
+          The sync job hasn&apos;t run yet, or the data URL in Settings is incorrect.
+          Check your GitHub Actions workflow or update the data URL.
+        </p>
+      ) : (
+        <p className="mx-auto mt-1 max-w-md text-sm text-white/50">
+          Make sure you have logged in (
+          <code className="text-white/70">uv run python -m garmin_dash.login</code>)
+          and run a sync (
+          <code className="text-white/70">uv run python -m garmin_dash.sync</code>).
+        </p>
+      )}
     </div>
   );
 }
