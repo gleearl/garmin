@@ -1,21 +1,34 @@
 """Fetch data from Garmin Connect and upsert it into the SQLite cache.
 
-CLI:   uv run python -m garmin_dash.sync --days 90
+CLI:
+    uv run python -m garmin_dash.sync --days 90              # recent window
+    uv run python -m garmin_dash.sync --all                  # full history backfill
+    uv run python -m garmin_dash.sync --start 2018-01-01     # explicit range
+
 Also called by the FastAPI ``POST /api/sync`` endpoint.
 
-Every fetch is wrapped defensively: Garmin's JSON shapes vary by account and
-device, and a missing field for one day should never abort the whole sync.
+Every per-day fetch is wrapped defensively: Garmin's JSON shapes vary by account
+and device, and a missing field for one day should never abort the whole sync.
+Genuine rate-limiting (HTTP 429), however, is handled specially: we back off and
+retry, and if Garmin keeps refusing we stop *cleanly* with progress saved, rather
+than punching holes in the data. Re-run with ``--skip-existing`` to resume.
 """
 
 from __future__ import annotations
 
 import argparse
+import time
 from datetime import date, timedelta
 
+from garminconnect import GarminConnectTooManyRequestsError
 from sqlmodel import Session
 
 from .client import get_client
 from .db import Activity, BodyRecord, DailyStat, SleepRecord, engine, init_db
+
+
+class RateLimited(Exception):
+    """Raised to halt a backfill gracefully when Garmin keeps returning 429."""
 
 
 def _g(d, *keys, default=None):
@@ -30,15 +43,47 @@ def _g(d, *keys, default=None):
     return cur
 
 
+def _fetch(label: str, method, *args, retries: int = 4, base_wait: float = 5.0):
+    """Call a Garmin client method with 429-aware retry/backoff.
+
+    - On success: returns the result.
+    - On persistent rate-limiting: raises ``RateLimited`` (stops the backfill so
+      progress already committed is kept and can be resumed).
+    - On any other error: logs and returns ``None`` so one bad day is skipped
+      without aborting the run.
+    """
+    for attempt in range(1, retries + 1):
+        try:
+            return method(*args)
+        except GarminConnectTooManyRequestsError:
+            if attempt == retries:
+                raise RateLimited(label)
+            wait = base_wait * (2 ** (attempt - 1))
+            print(f"  rate-limited at {label}; backing off {wait:.0f}s "
+                  f"(attempt {attempt}/{retries})")
+            time.sleep(wait)
+        except Exception as err:  # noqa: BLE001
+            # Some library versions surface a 429 as a generic error string.
+            if "429" in str(err):
+                if attempt == retries:
+                    raise RateLimited(label)
+                wait = base_wait * (2 ** (attempt - 1))
+                print(f"  rate-limited at {label}; backing off {wait:.0f}s "
+                      f"(attempt {attempt}/{retries})")
+                time.sleep(wait)
+                continue
+            print(f"  [{label}] skipped: {err}")
+            return None
+    return None
+
+
 def _upsert(session: Session, obj) -> None:
     session.merge(obj)
 
 
 def sync_daily(client, session: Session, day: str) -> None:
-    try:
-        s = client.get_stats(day) or {}
-    except Exception as err:  # noqa: BLE001
-        print(f"  [daily {day}] skipped: {err}")
+    s = _fetch(f"daily {day}", client.get_stats, day)
+    if s is None:
         return
     _upsert(
         session,
@@ -58,10 +103,8 @@ def sync_daily(client, session: Session, day: str) -> None:
 
 
 def sync_sleep(client, session: Session, day: str) -> None:
-    try:
-        s = client.get_sleep_data(day) or {}
-    except Exception as err:  # noqa: BLE001
-        print(f"  [sleep {day}] skipped: {err}")
+    s = _fetch(f"sleep {day}", client.get_sleep_data, day)
+    if s is None:
         return
     dto = s.get("dailySleepDTO") or {}
     total = dto.get("sleepTimeSeconds")
@@ -82,10 +125,8 @@ def sync_sleep(client, session: Session, day: str) -> None:
 
 
 def sync_body(client, session: Session, start: str, end: str) -> None:
-    try:
-        b = client.get_body_composition(start, end) or {}
-    except Exception as err:  # noqa: BLE001
-        print(f"  [body] skipped: {err}")
+    b = _fetch("body", client.get_body_composition, start, end)
+    if b is None:
         return
     for entry in b.get("dateWeightList") or []:
         cal = entry.get("calendarDate")
@@ -104,11 +145,7 @@ def sync_body(client, session: Session, start: str, end: str) -> None:
 
 
 def sync_vo2max(client, session: Session, day: str) -> None:
-    try:
-        m = client.get_max_metrics(day)
-    except Exception as err:  # noqa: BLE001
-        print(f"  [vo2max {day}] skipped: {err}")
-        return
+    m = _fetch(f"vo2max {day}", client.get_max_metrics, day)
     if not m:
         return
     record = m[0] if isinstance(m, list) else m
@@ -127,10 +164,8 @@ def sync_vo2max(client, session: Session, day: str) -> None:
 
 
 def sync_activities(client, session: Session, start: str, end: str) -> None:
-    try:
-        acts = client.get_activities_by_date(start, end) or []
-    except Exception as err:  # noqa: BLE001
-        print(f"  [activities] skipped: {err}")
+    acts = _fetch("activities", client.get_activities_by_date, start, end)
+    if not acts:
         return
     for a in acts:
         aid = a.get("activityId")
@@ -153,39 +188,116 @@ def sync_activities(client, session: Session, start: str, end: str) -> None:
         )
 
 
-def run_sync(days: int = 90) -> dict:
-    """Sync the last ``days`` days into SQLite. Returns a small summary."""
+def run_sync(
+    days: int = 90,
+    start: str | None = None,
+    end: str | None = None,
+    delay: float = 0.0,
+    skip_existing: bool = False,
+) -> dict:
+    """Sync a date range into SQLite and return a summary.
+
+    The range is ``[start, end]`` when both are given, otherwise the last
+    ``days`` days ending today.
+
+    - ``delay``: seconds to pause between days (throttle big backfills).
+    - ``skip_existing``: skip days that already have a DailyStat row — makes
+      re-runs cheap and lets an interrupted backfill resume where it stopped.
+
+    Progress is committed per day, so a graceful stop (rate-limit) or crash
+    never loses already-fetched days.
+    """
     init_db()
     client = get_client()
 
-    end = date.today()
-    start = end - timedelta(days=days - 1)
-    start_s, end_s = start.isoformat(), end.isoformat()
-    print(f"Syncing {start_s} .. {end_s} ({days} days)")
+    end_d = date.fromisoformat(end) if end else date.today()
+    start_d = date.fromisoformat(start) if start else end_d - timedelta(days=days - 1)
+    start_s, end_s = start_d.isoformat(), end_d.isoformat()
+    total_days = (end_d - start_d).days + 1
+    print(f"Syncing {start_s} .. {end_s} ({total_days} days)"
+          + (f", delay={delay}s" if delay else "")
+          + (", skip-existing" if skip_existing else ""))
+
+    processed = skipped = 0
+    stopped_at: str | None = None
 
     with Session(engine) as session:
-        # Per-day endpoints.
-        d = start
-        while d <= end:
-            day = d.isoformat()
-            sync_daily(client, session, day)
-            sync_sleep(client, session, day)
-            sync_vo2max(client, session, day)
-            d += timedelta(days=1)
-        # Range endpoints.
-        sync_body(client, session, start_s, end_s)
-        sync_activities(client, session, start_s, end_s)
-        session.commit()
+        d = start_d
+        try:
+            while d <= end_d:
+                day = d.isoformat()
+                if skip_existing and session.get(DailyStat, day) is not None:
+                    skipped += 1
+                    d += timedelta(days=1)
+                    continue
+                sync_daily(client, session, day)
+                sync_sleep(client, session, day)
+                sync_vo2max(client, session, day)
+                session.commit()  # incremental progress
+                processed += 1
+                if processed % 30 == 0:
+                    print(f"  …{day} ({processed} fetched, {skipped} skipped)")
+                if delay:
+                    time.sleep(delay)
+                d += timedelta(days=1)
+            # Range endpoints (single calls; cheap relative to the per-day loop).
+            sync_body(client, session, start_s, end_s)
+            sync_activities(client, session, start_s, end_s)
+            session.commit()
+        except RateLimited as rl:
+            session.commit()
+            stopped_at = d.isoformat()
+            print(f"\nStopped early — Garmin rate-limited at '{rl}'. "
+                  f"Progress saved up to {stopped_at}.\n"
+                  f"Wait ~30-60 min, then resume with:\n"
+                  f"  uv run python -m garmin_dash.sync "
+                  f"--start {start_s} --end {end_s} --skip-existing --delay 2")
 
-    print("Sync complete.")
-    return {"from": start_s, "to": end_s, "days": days}
+    status = "rate-limited" if stopped_at else "complete"
+    print(f"Sync {status}. fetched={processed} skipped={skipped}")
+    return {
+        "from": start_s,
+        "to": end_s,
+        "days": total_days,
+        "fetched": processed,
+        "skipped": skipped,
+        "status": status,
+        "stopped_at": stopped_at,
+    }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync Garmin data into SQLite.")
-    parser.add_argument("--days", type=int, default=90, help="days of history")
+    parser.add_argument("--days", type=int, default=90,
+                        help="days of history ending today (default 90)")
+    parser.add_argument("--start", help="start date YYYY-MM-DD (overrides --days)")
+    parser.add_argument("--end", help="end date YYYY-MM-DD (default today)")
+    parser.add_argument("--all", action="store_true",
+                        help="full history backfill (sets a very old start, "
+                             "throttled + resumable)")
+    parser.add_argument("--delay", type=float, default=0.0,
+                        help="seconds to pause between days (e.g. 2 for backfills)")
+    parser.add_argument("--skip-existing", action="store_true",
+                        help="skip days already cached (resume / cheap re-run)")
     args = parser.parse_args()
-    run_sync(args.days)
+
+    start = args.start
+    delay = args.delay
+    skip_existing = args.skip_existing
+    if args.all:
+        # Garmin Connect launched in 2007; this covers any real account.
+        start = start or "2008-01-01"
+        skip_existing = True
+        if not delay:
+            delay = 2.0
+
+    run_sync(
+        days=args.days,
+        start=start,
+        end=args.end,
+        delay=delay,
+        skip_existing=skip_existing,
+    )
 
 
 if __name__ == "__main__":

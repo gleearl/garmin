@@ -63,10 +63,12 @@ def login_interactive() -> Garmin:
 
         password = getpass.getpass("Garmin password: ")
 
-    garmin = Garmin(email=email, password=password, prompt_mfa=_prompt_mfa)
-    garmin.login()
     Path(TOKENSTORE).mkdir(parents=True, exist_ok=True)
-    garmin.garth.dump(TOKENSTORE)
+    garmin = Garmin(email=email, password=password, prompt_mfa=_prompt_mfa)
+    # garminconnect 0.3.x persists tokens when a tokenstore path is passed to login()
+    # (see garminconnect/__init__.py -> self.client.dump(tokenstore_path)). The old
+    # 0.2.x `garmin.garth.dump(...)` no longer exists.
+    garmin.login(TOKENSTORE)
     print(f"Login successful; tokens saved to {TOKENSTORE}")
     return garmin
 
