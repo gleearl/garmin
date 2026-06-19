@@ -1,7 +1,20 @@
 // Typed fetch helpers for the Garmin dashboard backend.
-// Base URL comes from NEXT_PUBLIC_API_URL, defaulting to the local FastAPI dev server.
+// At runtime, checks localStorage for a user-configured URL (set via the Settings
+// panel in the UI) so the static Pages build can point at any backend address.
+// Falls back to NEXT_PUBLIC_API_URL, then http://localhost:8000.
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const DEFAULT_API_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+export const LS_KEY = "garmin_api_url";
+
+function getBase(): string {
+  if (typeof window !== "undefined") {
+    const stored = localStorage.getItem(LS_KEY);
+    if (stored) return stored.replace(/\/$/, "");
+  }
+  return DEFAULT_API_URL;
+}
 
 export interface DailyStat {
   date: string;
@@ -60,7 +73,7 @@ function range(params?: { from?: string; to?: string }) {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
+  const res = await fetch(`${getBase()}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`${path} -> ${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
 }
@@ -76,7 +89,9 @@ export const api = {
   body: (r?: { from?: string; to?: string }) =>
     get<BodyRecord[]>(`/api/body${range(r)}`),
   sync: async (days = 90) => {
-    const res = await fetch(`${BASE}/api/sync?days=${days}`, { method: "POST" });
+    const res = await fetch(`${getBase()}/api/sync?days=${days}`, {
+      method: "POST",
+    });
     if (!res.ok) throw new Error(`sync failed: ${res.status}`);
     return res.json();
   },

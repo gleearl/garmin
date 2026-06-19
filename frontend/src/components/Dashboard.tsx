@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   BodyRecord,
@@ -20,6 +20,7 @@ import {
 } from "@/lib/format";
 import { StatCard, Panel } from "./Card";
 import { AreaTrend, LineTrend, StackedBars } from "./charts";
+import { Settings } from "./Settings";
 
 type Tab = "overview" | "activities" | "sleep" | "daily" | "body";
 
@@ -137,6 +138,7 @@ export default function Dashboard() {
           >
             {syncing ? "Syncing…" : "Sync now"}
           </button>
+          <Settings onSave={load} />
         </div>
       </div>
 
