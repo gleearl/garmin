@@ -8,6 +8,7 @@ All read endpoints serve from the SQLite cache (fast, offline-capable).
 
 from __future__ import annotations
 
+import os
 from datetime import date, timedelta
 
 from fastapi import FastAPI, Query
@@ -19,9 +20,23 @@ from .sync import run_sync
 
 app = FastAPI(title="Garmin Dashboard API")
 
+# Allowed browser origins. Defaults cover local dev plus the GitHub Pages site;
+# override with the CORS_ORIGINS env var (comma-separated) if your Pages URL differs.
+_DEFAULT_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://gleearl.github.io",
+]
+_origins = os.getenv("CORS_ORIGINS")
+allow_origins = (
+    [o.strip() for o in _origins.split(",") if o.strip()]
+    if _origins
+    else _DEFAULT_ORIGINS
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=allow_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

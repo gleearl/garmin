@@ -1,0 +1,6 @@
+# Automatic HTTPS via Let's Encrypt for {$DOMAIN}.
+# For a local dry-run, set DOMAIN=localhost (Caddy uses its internal CA;
+# curl with -k to accept the self-signed cert).
+{$DOMAIN} {
+	reverse_proxy api:8000
+}

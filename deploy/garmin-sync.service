@@ -1,0 +1,12 @@
+# Oneshot unit: pull the last 7 days from Garmin into the cache.
+# Triggered by garmin-sync.timer. Install to /etc/systemd/system/.
+# Adjust WorkingDirectory to wherever you cloned the repo on the VM.
+[Unit]
+Description=Garmin dashboard daily sync
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/garmin/deploy
+ExecStart=/usr/bin/docker compose exec -T api python -m garmin_dash.sync --days 7

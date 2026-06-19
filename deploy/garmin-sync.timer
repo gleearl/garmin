@@ -1,0 +1,12 @@
+# Run the sync daily at 06:00 (server time), catching up if the VM was off.
+# Install to /etc/systemd/system/ and enable with:
+#   sudo systemctl enable --now garmin-sync.timer
+[Unit]
+Description=Run Garmin dashboard sync daily
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

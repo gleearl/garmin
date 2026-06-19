@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+garmin.db
+*.db
+.env
+.env.*
+!.env.example
+.pytest_cache/

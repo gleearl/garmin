@@ -1,0 +1,35 @@
+# Production stack for the Oracle Cloud Always Free VM.
+# Caddy terminates HTTPS (auto Let's Encrypt) and proxies to the api container.
+# The `data` volume persists the SQLite cache + Garmin token store across restarts.
+
+services:
+  api:
+    build: ../backend
+    restart: unless-stopped
+    environment:
+      GARMIN_DB: /data/garmin.db
+      GARMINTOKENS: /data/tokens
+    volumes:
+      - data:/data
+    # No published ports: only Caddy is exposed to the internet.
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Set DOMAIN in deploy/.env (e.g. yourname.duckdns.org).
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:
