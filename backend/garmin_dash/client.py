@@ -1,0 +1,86 @@
+"""Garmin Connect client wrapper with token persistence.
+
+Authentication strategy (matches the upstream library's recommended flow):
+
+1. Try to resume a session from the persisted token store (``~/.garminconnect``).
+2. If that fails (missing/expired tokens), fall back to a full credential login,
+   prompting for an MFA code if Garmin requires one, then persist the new tokens.
+
+Credentials are only ever read at the interactive prompt or from a gitignored
+``.env`` file -- they are never stored by this app.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+from garminconnect import (
+    Garmin,
+    GarminConnectAuthenticationError,
+)
+
+load_dotenv()
+
+# Directory where garth/garminconnect persists OAuth tokens.
+TOKENSTORE = os.path.expanduser(
+    os.getenv("GARMINTOKENS", "~/.garminconnect")
+)
+
+
+def _prompt_mfa() -> str:
+    """Interactive MFA callback used during a fresh credential login."""
+    return input("Garmin MFA one-time code: ").strip()
+
+
+def resume() -> Garmin:
+    """Resume an existing session from the token store.
+
+    Raises if no valid tokens are present -- callers that need a guaranteed
+    client (the API server) should surface a clear "run login first" message.
+    """
+    garmin = Garmin()
+    garmin.login(TOKENSTORE)
+    return garmin
+
+
+def login_interactive() -> Garmin:
+    """Full login flow. Resumes if possible, otherwise authenticates with
+    credentials (prompting for email/password/MFA as needed) and persists tokens.
+    """
+    try:
+        garmin = resume()
+        print(f"Resumed Garmin session from {TOKENSTORE}")
+        return garmin
+    except (FileNotFoundError, GarminConnectAuthenticationError, Exception) as err:
+        print(f"No usable saved session ({type(err).__name__}); logging in...")
+
+    email = os.getenv("GARMIN_EMAIL") or input("Garmin email: ").strip()
+    password = os.getenv("GARMIN_PASSWORD")
+    if not password:
+        import getpass
+
+        password = getpass.getpass("Garmin password: ")
+
+    garmin = Garmin(email=email, password=password, prompt_mfa=_prompt_mfa)
+    garmin.login()
+    Path(TOKENSTORE).mkdir(parents=True, exist_ok=True)
+    garmin.garth.dump(TOKENSTORE)
+    print(f"Login successful; tokens saved to {TOKENSTORE}")
+    return garmin
+
+
+def get_client() -> Garmin:
+    """Return a ready-to-use client for non-interactive callers (sync/API).
+
+    Only resumes from saved tokens -- it will not block on prompts. If no
+    tokens exist, raises a clear error telling the user to run the login step.
+    """
+    try:
+        return resume()
+    except Exception as err:  # noqa: BLE001 - surface a friendly message
+        raise RuntimeError(
+            "Not logged in to Garmin. Run `uv run python -m garmin_dash.login` "
+            f"first to create a session in {TOKENSTORE}. (cause: {err})"
+        ) from err
