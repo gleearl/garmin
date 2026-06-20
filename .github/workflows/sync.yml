@@ -49,23 +49,26 @@ jobs:
         working-directory: backend
         run: uv run python -m garmin_dash.sync --days 7
 
-      - name: Export static JSON
+      # Push the cached data into the Laravel backend (the live data source the
+      # frontend reads). Idempotent upserts, so re-running is safe.
+      - name: Push to Laravel
         env:
+          LARAVEL_INGEST_URL: ${{ secrets.LARAVEL_INGEST_URL }}
+          LARAVEL_INGEST_TOKEN: ${{ secrets.LARAVEL_INGEST_TOKEN }}
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
           GARMIN_DB: garmin.db
-          GARMIN_EXPORT_DIR: export
         working-directory: backend
-        run: uv run python -m garmin_dash.export
+        run: uv run python -m garmin_dash.push
 
-      # Upload JSON to the web-served folder (garmin-data, which the domain serves
-      # from), and the DB to the SFTP home root, which is NOT web-served (private).
-      - name: Upload to IONOS
+      # Persist the DB back to IONOS (private home root, NOT web-served) so history
+      # carries over between runs.
+      - name: Upload garmin.db to IONOS
         env:
           IONOS_PASS: ${{ secrets.IONOS_SFTP_PASSWORD }}
         run: |
           lftp -e "
             set sftp:connect-program 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null';
             open sftp://${{ secrets.IONOS_SFTP_USER }}:${IONOS_PASS}@${{ secrets.IONOS_SFTP_HOST }};
-            mput -O ${{ secrets.IONOS_DATA_PATH }} backend/export/*.json;
             put backend/garmin.db -o garmin.db;
             bye
           "

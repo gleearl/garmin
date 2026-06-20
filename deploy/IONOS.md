@@ -2,6 +2,13 @@
 
 This covers one-time IONOS setup, GitHub secrets, and how to run the first sync.
 
+> **Note (current architecture):** the sync now **pushes** data into the Laravel
+> backend (`POST /api/garmin/ingest`) via `garmin_dash.push`, and the frontend reads
+> live from `https://backend.gleearl.com/api/garmin/*`. The static-JSON-on-IONOS flow
+> described below is the legacy path (kept as a fallback). New secrets:
+> `LARAVEL_INGEST_URL`, `LARAVEL_INGEST_TOKEN` (from `artisan garmin:token`), and
+> `GARMIN_EMAIL` (used as `source_user`).
+
 ## Architecture
 
 ```

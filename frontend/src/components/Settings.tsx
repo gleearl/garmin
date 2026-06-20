@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_DATA_URL, STATIC_MODE, LS_KEY } from "@/lib/api";
+import { DEFAULT_DATA_URL, STATIC_MODE, LS_KEY, LS_TOKEN_KEY } from "@/lib/api";
 
 export function Settings({ onSave }: { onSave: () => void }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState(DEFAULT_DATA_URL);
+  const [token, setToken] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"ok" | "err" | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -13,6 +14,8 @@ export function Settings({ onSave }: { onSave: () => void }) {
   useEffect(() => {
     const stored = localStorage.getItem(LS_KEY);
     if (stored) setUrl(stored);
+    const storedToken = localStorage.getItem(LS_TOKEN_KEY);
+    if (storedToken) setToken(storedToken);
   }, []);
 
   useEffect(() => {
@@ -27,6 +30,9 @@ export function Settings({ onSave }: { onSave: () => void }) {
   const save = () => {
     const trimmed = url.trim().replace(/\/$/, "");
     localStorage.setItem(LS_KEY, trimmed);
+    const t = token.trim();
+    if (t) localStorage.setItem(LS_TOKEN_KEY, t);
+    else localStorage.removeItem(LS_TOKEN_KEY);
     setOpen(false);
     onSave();
   };
@@ -35,9 +41,12 @@ export function Settings({ onSave }: { onSave: () => void }) {
     setTesting(true);
     setTestResult(null);
     const base = url.trim().replace(/\/$/, "");
-    const testUrl = STATIC_MODE ? `${base}/summary.json` : `${base}/api/summary`;
+    const testUrl = STATIC_MODE ? `${base}/summary.json` : `${base}/api/garmin/summary`;
+    const t = token.trim();
+    const headers: HeadersInit = { Accept: "application/json" };
+    if (t) headers["Authorization"] = `Bearer ${t}`;
     try {
-      const res = await fetch(testUrl, { cache: "no-store" });
+      const res = await fetch(testUrl, { cache: "no-store", headers });
       setTestResult(res.ok ? "ok" : "err");
     } catch {
       setTestResult("err");
@@ -64,7 +73,7 @@ export function Settings({ onSave }: { onSave: () => void }) {
           <p className="mb-3 text-xs text-white/40">
             {STATIC_MODE
               ? "URL of your IONOS data folder where the JSON files are hosted (e.g. https://yourdomain.com/garmin-data). Saved in localStorage."
-              : "Address of your running FastAPI backend (e.g. a Cloudflare Tunnel or ngrok URL). Saved in localStorage."}
+              : "Base URL of the Laravel backend (e.g. https://backend.gleearl.com). Saved in localStorage."}
           </p>
           <input
             className="mb-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-blue-500"
@@ -73,9 +82,30 @@ export function Settings({ onSave }: { onSave: () => void }) {
               setUrl(e.target.value);
               setTestResult(null);
             }}
-            placeholder={STATIC_MODE ? "https://yourdomain.com/garmin-data" : "http://localhost:8000"}
+            placeholder={STATIC_MODE ? "https://yourdomain.com/garmin-data" : "https://backend.gleearl.com"}
             spellCheck={false}
           />
+          {!STATIC_MODE && (
+            <>
+              <p className="mb-1 text-sm font-medium">API token</p>
+              <p className="mb-2 text-xs text-white/40">
+                Read token from the backend (artisan garmin:token --read). Stored only
+                in this browser; sent as a Bearer token.
+              </p>
+              <input
+                type="password"
+                className="mb-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                value={token}
+                onChange={(e) => {
+                  setToken(e.target.value);
+                  setTestResult(null);
+                }}
+                placeholder="1|abcdef…"
+                spellCheck={false}
+                autoComplete="off"
+              />
+            </>
+          )}
           <div className="flex items-center gap-2">
             <button
               onClick={test}

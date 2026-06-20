@@ -24,12 +24,23 @@ export const STATIC_MODE: boolean =
 
 export const LS_KEY = "garmin_data_url";
 
+// Live mode (Laravel) read token. Stored per-browser via the Settings panel so it
+// never ships in the public bundle. Sent as a Bearer token when present.
+export const LS_TOKEN_KEY = "garmin_api_token";
+
 function getBase(): string {
   if (typeof window !== "undefined") {
     const stored = localStorage.getItem(LS_KEY);
     if (stored) return stored.replace(/\/$/, "");
   }
   return DEFAULT_DATA_URL;
+}
+
+function getToken(): string | null {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem(LS_TOKEN_KEY);
+  }
+  return null;
 }
 
 export interface DailyStat {
@@ -88,7 +99,10 @@ export interface Meta {
 }
 
 async function get<T>(url: string): Promise<T> {
-  const res = await fetch(url, { cache: "no-store" });
+  const token = getToken();
+  const headers: HeadersInit = { Accept: "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(url, { cache: "no-store", headers });
   if (!res.ok) throw new Error(`${url} -> ${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
 }
@@ -132,7 +146,7 @@ export const api = {
     const base = getBase();
     return STATIC_MODE
       ? get<Summary>(`${base}/summary.json`)
-      : get<Summary>(`${base}/api/summary`);
+      : get<Summary>(`${base}/api/garmin/summary`);
   },
 
   meta: (): Promise<Meta> => {
@@ -148,7 +162,7 @@ export const api = {
       const all = await get<DailyStat[]>(`${base}/daily.json`);
       return filterByDate(all, r?.from, r?.to);
     }
-    return get<DailyStat[]>(`${base}/api/daily${liveRange(r)}`);
+    return get<DailyStat[]>(`${base}/api/garmin/daily${liveRange(r)}`);
   },
 
   sleep: async (r?: { from?: string; to?: string }): Promise<SleepRecord[]> => {
@@ -157,7 +171,7 @@ export const api = {
       const all = await get<SleepRecord[]>(`${base}/sleep.json`);
       return filterByDate(all, r?.from, r?.to);
     }
-    return get<SleepRecord[]>(`${base}/api/sleep${liveRange(r)}`);
+    return get<SleepRecord[]>(`${base}/api/garmin/sleep${liveRange(r)}`);
   },
 
   activities: async (r?: {
@@ -169,7 +183,7 @@ export const api = {
       const all = await get<Activity[]>(`${base}/activities.json`);
       return filterActivities(all, r?.from, r?.to);
     }
-    return get<Activity[]>(`${base}/api/activities${liveRange(r)}`);
+    return get<Activity[]>(`${base}/api/garmin/activities${liveRange(r)}`);
   },
 
   body: async (r?: { from?: string; to?: string }): Promise<BodyRecord[]> => {
@@ -178,6 +192,6 @@ export const api = {
       const all = await get<BodyRecord[]>(`${base}/body.json`);
       return filterByDate(all, r?.from, r?.to);
     }
-    return get<BodyRecord[]>(`${base}/api/body${liveRange(r)}`);
+    return get<BodyRecord[]>(`${base}/api/garmin/body${liveRange(r)}`);
   },
 };
