@@ -27,3 +27,4 @@ npm-debug.log*
 
 # Claude Code worktrees (transient)
 .claude/worktrees/
+frontend/.claude/worktrees/
