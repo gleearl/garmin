@@ -43,6 +43,35 @@ function getToken(): string | null {
   return null;
 }
 
+export function hasToken(): boolean {
+  return !!getToken();
+}
+
+/** Log in against the Laravel garmin backend and store the returned read token. */
+export async function login(email: string, password: string): Promise<void> {
+  const res = await fetch(`${getBase()}/api/garmin/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ email, password, device_name: "dashboard" }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      res.status === 422 ? "Invalid email or password." : `Login failed (${res.status}).`,
+    );
+  }
+  const data = (await res.json()) as { token: string };
+  if (typeof window !== "undefined") localStorage.setItem(LS_TOKEN_KEY, data.token);
+}
+
+export function logout(): void {
+  if (typeof window !== "undefined") localStorage.removeItem(LS_TOKEN_KEY);
+}
+
+/** True when an error from get() was an auth failure (expired/invalid token). */
+export function isAuthError(e: unknown): boolean {
+  return e instanceof Error && / 401\b/.test(e.message);
+}
+
 export interface DailyStat {
   date: string;
   steps: number | null;

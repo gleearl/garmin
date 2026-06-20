@@ -6,7 +6,6 @@ import { DEFAULT_DATA_URL, STATIC_MODE, LS_KEY, LS_TOKEN_KEY } from "@/lib/api";
 export function Settings({ onSave }: { onSave: () => void }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState(DEFAULT_DATA_URL);
-  const [token, setToken] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"ok" | "err" | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -14,8 +13,6 @@ export function Settings({ onSave }: { onSave: () => void }) {
   useEffect(() => {
     const stored = localStorage.getItem(LS_KEY);
     if (stored) setUrl(stored);
-    const storedToken = localStorage.getItem(LS_TOKEN_KEY);
-    if (storedToken) setToken(storedToken);
   }, []);
 
   useEffect(() => {
@@ -30,9 +27,6 @@ export function Settings({ onSave }: { onSave: () => void }) {
   const save = () => {
     const trimmed = url.trim().replace(/\/$/, "");
     localStorage.setItem(LS_KEY, trimmed);
-    const t = token.trim();
-    if (t) localStorage.setItem(LS_TOKEN_KEY, t);
-    else localStorage.removeItem(LS_TOKEN_KEY);
     setOpen(false);
     onSave();
   };
@@ -42,12 +36,14 @@ export function Settings({ onSave }: { onSave: () => void }) {
     setTestResult(null);
     const base = url.trim().replace(/\/$/, "");
     const testUrl = STATIC_MODE ? `${base}/summary.json` : `${base}/api/garmin/summary`;
-    const t = token.trim();
+    const t = localStorage.getItem(LS_TOKEN_KEY);
     const headers: HeadersInit = { Accept: "application/json" };
     if (t) headers["Authorization"] = `Bearer ${t}`;
     try {
       const res = await fetch(testUrl, { cache: "no-store", headers });
-      setTestResult(res.ok ? "ok" : "err");
+      // In live mode a reachable backend returns 200 (logged in) or 401 (not yet);
+      // both prove connectivity.
+      setTestResult(res.ok || res.status === 401 ? "ok" : "err");
     } catch {
       setTestResult("err");
     } finally {
@@ -85,27 +81,6 @@ export function Settings({ onSave }: { onSave: () => void }) {
             placeholder={STATIC_MODE ? "https://yourdomain.com/garmin-data" : "https://backend.gleearl.com"}
             spellCheck={false}
           />
-          {!STATIC_MODE && (
-            <>
-              <p className="mb-1 text-sm font-medium">API token</p>
-              <p className="mb-2 text-xs text-white/40">
-                Read token from the backend (artisan garmin:token --read). Stored only
-                in this browser; sent as a Bearer token.
-              </p>
-              <input
-                type="password"
-                className="mb-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-blue-500"
-                value={token}
-                onChange={(e) => {
-                  setToken(e.target.value);
-                  setTestResult(null);
-                }}
-                placeholder="1|abcdef…"
-                spellCheck={false}
-                autoComplete="off"
-              />
-            </>
-          )}
           <div className="flex items-center gap-2">
             <button
               onClick={test}

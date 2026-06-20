@@ -9,7 +9,11 @@ import {
   Summary,
   api,
   STATIC_MODE,
+  hasToken,
+  logout,
+  isAuthError,
 } from "@/lib/api";
+import { Login } from "./Login";
 import {
   fmtNum,
   metersToKm,
@@ -60,6 +64,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Auth gate (live mode only). Static mode needs no login.
+  const [authed, setAuthed] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,21 +88,45 @@ export default function Dashboard() {
       setBody(b);
       setLastUpdated(m.last_updated);
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Failed to reach the data source. Check your settings.",
-      );
+      if (isAuthError(e)) {
+        // Token missing/expired — drop it and fall back to the login screen.
+        logout();
+        setAuthed(false);
+        setError(null);
+      } else {
+        setError(
+          e instanceof Error ? e.message : "Failed to reach the data source. Check your settings.",
+        );
+      }
     } finally {
       setLoading(false);
     }
   }, [days]);
 
+  // Resolve auth state once on mount (localStorage is client-only).
   useEffect(() => {
-    load();
-  }, [load]);
+    setAuthed(STATIC_MODE || hasToken());
+    setAuthReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (authed) load();
+  }, [load, authed]);
+
+  const signOut = () => {
+    logout();
+    setAuthed(false);
+  };
 
   const hasData =
     summary &&
     (summary.daily || daily.length || sleep.length || activities.length);
+
+  // Wait until we've checked stored auth, then gate live mode behind login.
+  if (!authReady) return null;
+  if (!STATIC_MODE && !authed) {
+    return <Login onSuccess={() => setAuthed(true)} />;
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-3 py-4 pb-24 sm:px-4 sm:py-6 md:pb-6">
@@ -136,6 +167,15 @@ export default function Dashboard() {
             ))}
           </div>
           <Settings onSave={load} />
+          {!STATIC_MODE && (
+            <button
+              onClick={signOut}
+              title="Log out"
+              className="flex h-10 items-center rounded-lg border border-white/10 px-3 text-sm text-white/50 hover:text-white sm:h-8"
+            >
+              Log out
+            </button>
+          )}
         </div>
       </div>
 
