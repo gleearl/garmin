@@ -38,9 +38,10 @@ jobs:
         run: npm run build
         working-directory: frontend
         env:
-          # Points the Pages build at the IONOS static JSON data folder.
-          # Override at runtime via the Settings panel (gear icon) if needed.
-          NEXT_PUBLIC_DATA_URL: ${{ vars.IONOS_DATA_URL }}
+          # Live mode: the Pages site reads from the Laravel backend's
+          # /api/garmin/* endpoints. Visitors enter their read token via the
+          # Settings panel (gear icon); it is never baked into the bundle.
+          NEXT_PUBLIC_API_URL: https://backend.gleearl.com
 
       - uses: actions/configure-pages@v4
 
