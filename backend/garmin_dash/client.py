@@ -43,6 +43,41 @@ TOKENSTORE = os.path.expanduser(
 # The single file garminconnect reads and rewrites inside TOKENSTORE.
 TOKEN_FILE = Path(TOKENSTORE) / "garmin_tokens.json"
 
+# Written only after Garmin actually accepts the tokens. A sibling of the store
+# rather than a file inside it, so `token_dump` (which tars the whole directory)
+# can't bake a stale marker into the secret. CI keys its "should I persist this
+# token store?" decision off this file -- see sync.yml.
+AUTH_OK_MARKER = Path(str(TOKENSTORE) + ".auth-ok")
+
+
+def _env_token_bytes() -> bytes | None:
+    """The garmin_tokens.json carried by GARMIN_TOKEN_BASE64, if it is set."""
+    b64 = os.getenv("GARMIN_TOKEN_BASE64")
+    if not b64:
+        return None
+    import base64
+    import io
+    import tarfile
+
+    with contextlib.suppress(Exception):
+        with tarfile.open(fileobj=io.BytesIO(base64.b64decode(b64)), mode="r:gz") as tar:
+            member = tar.extractfile("./garmin_tokens.json") or tar.extractfile(
+                "garmin_tokens.json"
+            )
+            if member:
+                return member.read()
+    return None
+
+
+def _write_token_store(payload: bytes) -> None:
+    """Install a token store, owner-only, matching garminconnect's own perms."""
+    Path(TOKENSTORE).mkdir(mode=0o700, parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        Path(TOKENSTORE).chmod(0o700)
+    TOKEN_FILE.write_bytes(payload)
+    with contextlib.suppress(OSError):
+        TOKEN_FILE.chmod(0o600)
+
 
 def _restore_tokens_from_env() -> None:
     """Seed the token store from GARMIN_TOKEN_BASE64 (for CI/GitHub Actions).
@@ -53,24 +88,36 @@ def _restore_tokens_from_env() -> None:
     An existing store always wins: the env var is a fixed snapshot, while the
     on-disk store carries the rotated refresh token from the last run. Restoring
     over a live store would roll the credential backwards to a token Garmin has
-    already invalidated.
+    already invalidated. See `_reseed_from_env` for the recovery path when the
+    existing store turns out to be the dead one.
     """
-    b64 = os.getenv("GARMIN_TOKEN_BASE64")
-    if not b64:
+    payload = _env_token_bytes()
+    if payload is None:
         return
     if TOKEN_FILE.exists():
         print(f"Using existing token store at {TOKENSTORE} (ignoring GARMIN_TOKEN_BASE64)")
         return
-
-    import base64
-    import io
-    import tarfile
-
-    data = base64.b64decode(b64)
-    Path(TOKENSTORE).mkdir(mode=0o700, parents=True, exist_ok=True)
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-        tar.extractall(TOKENSTORE)
+    _write_token_store(payload)
     print(f"Seeded token store at {TOKENSTORE} from GARMIN_TOKEN_BASE64")
+
+
+def _reseed_from_env() -> bool:
+    """Replace a rejected token store with the GARMIN_TOKEN_BASE64 snapshot.
+
+    Without this, a dead token that reached the shared store (IONOS) would
+    shadow the env var forever: the store exists, so the snapshot is ignored,
+    so refreshing the secret has no effect. Falling back keeps "refresh the
+    secret" working as the documented recovery lever.
+    """
+    payload = _env_token_bytes()
+    if payload is None:
+        return False
+    with contextlib.suppress(OSError):
+        if TOKEN_FILE.read_bytes() == payload:
+            return False  # Same token; retrying would fail identically.
+    _write_token_store(payload)
+    print("Saved tokens were rejected; retrying with GARMIN_TOKEN_BASE64.")
+    return True
 
 
 def _prompt_mfa() -> str:
@@ -87,8 +134,16 @@ def resume() -> Garmin:
     client (the API server) should surface a clear "run login first" message.
     """
     _restore_tokens_from_env()
+    # Clear first: the marker must describe this attempt, never a previous one.
+    with contextlib.suppress(OSError):
+        AUTH_OK_MARKER.unlink()
     garmin = Garmin()
     garmin.login(TOKENSTORE)
+    # login() round-trips a real API call, so reaching here means Garmin accepted
+    # the tokens now on disk -- the only state that is safe to share with the
+    # next run.
+    with contextlib.suppress(OSError):
+        AUTH_OK_MARKER.write_text("ok\n")
     return garmin
 
 
@@ -182,6 +237,16 @@ def get_client() -> Garmin:
         with _capture_refresh_errors() as captured:
             return resume()
     except Exception as err:  # noqa: BLE001 - surface a friendly message
+        # A rejected store is recoverable if the env var holds a different
+        # snapshot -- typically a freshly refreshed secret after the shared
+        # store went stale.
+        if TOKEN_FILE.exists() and _reseed_from_env():
+            try:
+                with _capture_refresh_errors() as captured:
+                    return resume()
+            except Exception as retry_err:  # noqa: BLE001
+                err = retry_err
+
         if not TOKEN_FILE.exists():
             raise RuntimeError(
                 "Not logged in to Garmin. Run `uv run python -m garmin_dash.login` "
