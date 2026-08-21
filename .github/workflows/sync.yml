@@ -11,6 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    env:
+      # Pin the token store somewhere both the restore/persist steps and the
+      # Python code agree on, rather than relying on the $HOME default.
+      GARMINTOKENS: ${{ github.workspace }}/.garmintokens
+      IONOS_USER: ${{ secrets.IONOS_SFTP_USER }}
+      IONOS_PASS: ${{ secrets.IONOS_SFTP_PASSWORD }}
+      IONOS_HOST: ${{ secrets.IONOS_SFTP_HOST }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -29,25 +37,66 @@ jobs:
       - name: Install lftp
         run: sudo apt-get install -y lftp
 
-      # Download the persisted DB from IONOS so we don't lose history between runs.
-      # The || true means the first run (no DB yet) is handled gracefully.
-      - name: Download garmin.db from IONOS
-        env:
-          IONOS_PASS: ${{ secrets.IONOS_SFTP_PASSWORD }}
+      # Pull the two pieces of state that have to survive between runs: the
+      # accumulated database, and the Garmin token store (Garmin rotates the
+      # refresh token on every refresh, so last run's copy is the only live one).
+      - name: Restore state from IONOS
         run: |
-          lftp -e "
-            set sftp:connect-program 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null';
-            open sftp://${{ secrets.IONOS_SFTP_USER }}:${IONOS_PASS}@${{ secrets.IONOS_SFTP_HOST }};
-            get garmin.db -o backend/garmin.db;
-            bye
-          " 2>/dev/null || echo "No existing DB found; starting fresh."
+          set -euo pipefail
+          source .github/scripts/ionos.sh
+
+          # A failed login is fatal. Previously it was swallowed, so the job
+          # carried on with an empty database and then pushed that back over
+          # the remote copy -- silently truncating history.
+          if ! listing=$(ionos_list); then
+            echo "::error::Cannot log in to IONOS over SFTP. Refusing to continue:" \
+                 "starting from an empty database would overwrite the stored history."
+            exit 1
+          fi
+
+          if ionos_has garmin.db "$listing"; then
+            ionos_run "get garmin.db -o backend/garmin.db;"
+            echo "Restored garmin.db ($(du -h backend/garmin.db | cut -f1))"
+          else
+            echo "No garmin.db on IONOS yet; starting fresh."
+          fi
+
+          mkdir -p "$GARMINTOKENS"
+          chmod 700 "$GARMINTOKENS"
+          if ionos_has garmin_tokens.json "$listing"; then
+            ionos_run "get garmin_tokens.json -o $GARMINTOKENS/garmin_tokens.json;"
+            chmod 600 "$GARMINTOKENS/garmin_tokens.json"
+            echo "Restored Garmin token store from the last run."
+          else
+            echo "No token store on IONOS yet; seeding from GARMIN_TOKEN_BASE64."
+          fi
 
       - name: Sync last 7 days from Garmin
         env:
+          # Bootstrap only. Used when IONOS has no token store yet; once one is
+          # persisted there it takes precedence, because this secret is a fixed
+          # snapshot whose refresh token Garmin rotates away.
           GARMIN_TOKEN_BASE64: ${{ secrets.GARMIN_TOKEN_BASE64 }}
           GARMIN_DB: garmin.db
         working-directory: backend
         run: uv run python -m garmin_dash.sync --days 7
+
+      # Persist the token store before anything else can fail. The sync above
+      # rotates the refresh token, which invalidates the copy on IONOS the
+      # moment it happens -- so this has to run even when a later step fails,
+      # or the next run would restore a token Garmin has already rejected.
+      - name: Persist Garmin token store to IONOS
+        if: always()
+        run: |
+          set -euo pipefail
+          source .github/scripts/ionos.sh
+
+          if [ ! -f "$GARMINTOKENS/garmin_tokens.json" ]; then
+            echo "No token store to persist."
+            exit 0
+          fi
+          ionos_run "put $GARMINTOKENS/garmin_tokens.json -o garmin_tokens.json;"
+          echo "Persisted the rotated Garmin token store."
 
       # Push the cached data into the Laravel backend (the live data source the
       # frontend reads). Idempotent upserts, so re-running is safe.
@@ -63,12 +112,7 @@ jobs:
       # Persist the DB back to IONOS (private home root, NOT web-served) so history
       # carries over between runs.
       - name: Upload garmin.db to IONOS
-        env:
-          IONOS_PASS: ${{ secrets.IONOS_SFTP_PASSWORD }}
         run: |
-          lftp -e "
-            set sftp:connect-program 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null';
-            open sftp://${{ secrets.IONOS_SFTP_USER }}:${IONOS_PASS}@${{ secrets.IONOS_SFTP_HOST }};
-            put backend/garmin.db -o garmin.db;
-            bye
-          "
+          set -euo pipefail
+          source .github/scripts/ionos.sh
+          ionos_run "put backend/garmin.db -o garmin.db;"

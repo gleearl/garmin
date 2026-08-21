@@ -8,11 +8,22 @@ Authentication strategy (matches the upstream library's recommended flow):
 
 Credentials are only ever read at the interactive prompt or from a gitignored
 ``.env`` file -- they are never stored by this app.
+
+Garmin rotates the refresh token on every refresh, so the token store is
+mutable state, not a fixed credential. Whatever is already on disk wins over
+``GARMIN_TOKEN_BASE64``; the env var is only a bootstrap for a machine that has
+no store yet. A CI job that restores the store from the env var on every run
+replays a refresh token that Garmin has already rotated away, which works until
+the original expires and then fails with ``invalid_grant``. See sync.yml, which
+round-trips the store through IONOS so each run persists the rotated token.
 """
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -29,24 +40,37 @@ TOKENSTORE = os.path.expanduser(
 )
 
 
+# The single file garminconnect reads and rewrites inside TOKENSTORE.
+TOKEN_FILE = Path(TOKENSTORE) / "garmin_tokens.json"
+
+
 def _restore_tokens_from_env() -> None:
-    """Materialize the token store from GARMIN_TOKEN_BASE64 (for CI/GitHub Actions).
+    """Seed the token store from GARMIN_TOKEN_BASE64 (for CI/GitHub Actions).
 
     The value is produced by `python -m garmin_dash.token_dump` — a base64-encoded
     gzipped tar of the token directory. A no-op if the env var is absent.
+
+    An existing store always wins: the env var is a fixed snapshot, while the
+    on-disk store carries the rotated refresh token from the last run. Restoring
+    over a live store would roll the credential backwards to a token Garmin has
+    already invalidated.
     """
     b64 = os.getenv("GARMIN_TOKEN_BASE64")
     if not b64:
         return
+    if TOKEN_FILE.exists():
+        print(f"Using existing token store at {TOKENSTORE} (ignoring GARMIN_TOKEN_BASE64)")
+        return
+
     import base64
     import io
     import tarfile
-    from pathlib import Path
 
     data = base64.b64decode(b64)
-    Path(TOKENSTORE).mkdir(parents=True, exist_ok=True)
+    Path(TOKENSTORE).mkdir(mode=0o700, parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         tar.extractall(TOKENSTORE)
+    print(f"Seeded token store at {TOKENSTORE} from GARMIN_TOKEN_BASE64")
 
 
 def _prompt_mfa() -> str:
@@ -96,16 +120,80 @@ def login_interactive() -> Garmin:
     return garmin
 
 
+# Garmin echoes the rejected token back in its error body, so anything captured
+# from the logger has to be scrubbed before it reaches a log or a raised message.
+# Long *and* containing a digit: matches base64/JWT blobs while leaving prose
+# and identifiers like GarminConnectAuthenticationError intact.
+_TOKENISH = re.compile(r"(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{32,}")
+
+
+def _redact(text: str, limit: int = 200) -> str:
+    """Strip token-shaped blobs and cap length for safe display in CI logs."""
+    cleaned = _TOKENISH.sub("<redacted>", text)
+    return cleaned if len(cleaned) <= limit else cleaned[:limit] + "..."
+
+
+class _RefreshErrorCapture(logging.Handler):
+    """Collect the refresh failure garminconnect only logs at DEBUG.
+
+    ``Client._refresh_session`` swallows a failed token refresh and retries the
+    request with the stale bearer token, so the caller sees a bare ``API Error
+    401`` with no body. The real reason (e.g. ``invalid_grant``) is only ever
+    logged. Capturing it turns an opaque 401 into an actionable message.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        with contextlib.suppress(Exception):
+            msg = record.getMessage()
+            if "refresh" in msg.lower():
+                self.messages.append(_redact(msg))
+
+
+@contextlib.contextmanager
+def _capture_refresh_errors():
+    """Temporarily tap garminconnect's logger without changing global config."""
+    logger = logging.getLogger("garminconnect")
+    handler = _RefreshErrorCapture()
+    previous_level, previous_propagate = logger.level, logger.propagate
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    # Keep the debug chatter out of the app's own logging output.
+    logger.propagate = False
+    try:
+        yield handler
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
+
+
 def get_client() -> Garmin:
     """Return a ready-to-use client for non-interactive callers (sync/API).
 
-    Only resumes from saved tokens -- it will not block on prompts. If no
-    tokens exist, raises a clear error telling the user to run the login step.
+    Only resumes from saved tokens -- it will not block on prompts. Raises a
+    message that distinguishes "never logged in" from "the saved tokens were
+    rejected", since the two need different fixes.
     """
     try:
-        return resume()
+        with _capture_refresh_errors() as captured:
+            return resume()
     except Exception as err:  # noqa: BLE001 - surface a friendly message
+        if not TOKEN_FILE.exists():
+            raise RuntimeError(
+                "Not logged in to Garmin. Run `uv run python -m garmin_dash.login` "
+                f"first to create a session in {TOKENSTORE}. (cause: {err})"
+            ) from err
+
+        detail = captured.messages[-1] if captured.messages else _redact(str(err))
         raise RuntimeError(
-            "Not logged in to Garmin. Run `uv run python -m garmin_dash.login` "
-            f"first to create a session in {TOKENSTORE}. (cause: {err})"
+            f"Garmin rejected the saved tokens in {TOKENSTORE}. The refresh token "
+            "has expired or was rotated away (Garmin issues a new one on every "
+            "refresh, so a stale copy stops working). Re-run "
+            "`uv run python -m garmin_dash.login`, then refresh the "
+            "GARMIN_TOKEN_BASE64 secret with `python -m garmin_dash.token_dump`. "
+            f"(cause: {detail})"
         ) from err
