@@ -85,18 +85,27 @@ jobs:
       # rotates the refresh token, which invalidates the copy on IONOS the
       # moment it happens -- so this has to run even when a later step fails,
       # or the next run would restore a token Garmin has already rejected.
+      #
+      # Gated on the marker the sync writes only after Garmin accepts the
+      # tokens. Without that gate a failed run uploads whatever is on disk --
+      # including a dead token seeded from GARMIN_TOKEN_BASE64 -- which would
+      # then shadow the secret on every later run and make refreshing it useless.
       - name: Persist Garmin token store to IONOS
         if: always()
         run: |
           set -euo pipefail
           source .github/scripts/ionos.sh
 
+          if [ ! -f "$GARMINTOKENS.auth-ok" ]; then
+            echo "Garmin did not accept these tokens; leaving the stored copy alone."
+            exit 0
+          fi
           if [ ! -f "$GARMINTOKENS/garmin_tokens.json" ]; then
             echo "No token store to persist."
             exit 0
           fi
           ionos_run "put $GARMINTOKENS/garmin_tokens.json -o garmin_tokens.json;"
-          echo "Persisted the rotated Garmin token store."
+          echo "Persisted the Garmin token store."
 
       # Push the cached data into the Laravel backend (the live data source the
       # frontend reads). Idempotent upserts, so re-running is safe.
