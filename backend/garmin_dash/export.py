@@ -3,7 +3,8 @@
 Run:  uv run python -m garmin_dash.export
 
 Writes to GARMIN_EXPORT_DIR (default: ./export):
-  daily.json, sleep.json, activities.json, body.json, summary.json, meta.json
+  daily.json, sleep.json, activities.json, body.json, blood_pressure.json,
+  summary.json, meta.json
 
 These files are then uploaded to the IONOS web-accessible data folder.
 """
@@ -17,7 +18,15 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
-from .db import Activity, BodyRecord, DailyStat, SleepRecord, engine, init_db
+from .db import (
+    Activity,
+    BloodPressureReading,
+    BodyRecord,
+    DailyStat,
+    SleepRecord,
+    engine,
+    init_db,
+)
 from .queries import latest_summary
 
 EXPORT_DIR = os.getenv(
@@ -44,6 +53,9 @@ def run_export() -> None:
             select(Activity).order_by(Activity.start_time.desc())
         ).all()
         body = s.exec(select(BodyRecord).order_by(BodyRecord.date)).all()
+        blood_pressure = s.exec(
+            select(BloodPressureReading).order_by(BloodPressureReading.measured_at)
+        ).all()
         summary = latest_summary(s)
 
     def write(name: str, data: object) -> None:
@@ -57,6 +69,7 @@ def run_export() -> None:
     write("sleep.json", [r.model_dump() for r in sleep])
     write("activities.json", [r.model_dump() for r in activities])
     write("body.json", [r.model_dump() for r in body])
+    write("blood_pressure.json", [r.model_dump() for r in blood_pressure])
     write(
         "summary.json",
         {k: _serialize(v) for k, v in summary.items()},

@@ -2,7 +2,7 @@
 
 A local [MCP](https://modelcontextprotocol.io) server that lets **Claude** read your
 Garmin data. It wraps the Laravel backend's read API (`/api/garmin/*`) as tools:
-`summary`, `daily`, `sleep`, `activities`, `body`.
+`summary`, `daily`, `sleep`, `activities`, `body`, `blood_pressure`.
 
 It's a **local stdio server** — not hosted. The Claude app launches it on demand; it
 calls your backend over HTTPS with a read-only token and returns JSON. Read-only; your

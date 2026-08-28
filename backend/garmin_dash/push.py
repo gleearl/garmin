@@ -23,7 +23,15 @@ import urllib.request
 
 from sqlmodel import Session, select
 
-from .db import Activity, BodyRecord, DailyStat, SleepRecord, engine, init_db
+from .db import (
+    Activity,
+    BloodPressureReading,
+    BodyRecord,
+    DailyStat,
+    SleepRecord,
+    engine,
+    init_db,
+)
 
 
 def build_payload(source_user: str) -> dict:
@@ -31,7 +39,7 @@ def build_payload(source_user: str) -> dict:
 
     Uses the same ``model_dump()`` serialization as the JSON exporter, so the
     shapes match the Laravel ingest contract (activities keyed by Garmin ``id``,
-    daily/sleep/body keyed by ``date``).
+    daily/sleep/body keyed by ``date``, blood pressure by ``measured_at``).
     """
     init_db()
     with Session(engine) as s:
@@ -39,6 +47,9 @@ def build_payload(source_user: str) -> dict:
         sleep = s.exec(select(SleepRecord).order_by(SleepRecord.date)).all()
         activities = s.exec(select(Activity).order_by(Activity.start_time)).all()
         body = s.exec(select(BodyRecord).order_by(BodyRecord.date)).all()
+        blood_pressure = s.exec(
+            select(BloodPressureReading).order_by(BloodPressureReading.measured_at)
+        ).all()
 
     return {
         "source_user": source_user,
@@ -46,6 +57,7 @@ def build_payload(source_user: str) -> dict:
         "sleep": [r.model_dump() for r in sleep],
         "activities": [r.model_dump() for r in activities],
         "body": [r.model_dump() for r in body],
+        "blood_pressure": [r.model_dump() for r in blood_pressure],
     }
 
 

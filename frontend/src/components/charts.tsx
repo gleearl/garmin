@@ -9,6 +9,7 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -95,6 +96,69 @@ export function AreaTrend<T extends object>({
         />
       </AreaChart>
     </ResponsiveContainer>
+    </div>
+  );
+}
+
+export interface LineSeries {
+  key: string;
+  color: string;
+  label: string;
+}
+
+/** Several lines on one axis (e.g. systolic / diastolic / pulse).
+ *  ``xKey``/``xFormatter`` allow a timestamped x-axis instead of a plain date. */
+export function MultiLineTrend<T extends object>({
+  data,
+  series,
+  unit = "",
+  xKey = "date",
+  xFormatter = shortDate,
+  refLines = [],
+}: {
+  data: T[];
+  series: LineSeries[];
+  unit?: string;
+  xKey?: string;
+  xFormatter?: (v: string) => string;
+  refLines?: { y: number; color: string }[];
+}) {
+  return (
+    <div className="h-44 sm:h-56">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+          <CartesianGrid stroke={GRID} vertical={false} />
+          <XAxis dataKey={xKey} tickFormatter={xFormatter} {...AXIS} minTickGap={24} />
+          <YAxis {...AXIS} width={40} domain={["auto", "auto"]} />
+          <Tooltip
+            contentStyle={tooltipStyle}
+            labelFormatter={(v) => xFormatter(String(v))}
+            formatter={(value) => `${value}${unit}`}
+          />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          {/* Unlabelled on purpose — the y-axis already carries the scale. */}
+          {refLines.map((r) => (
+            <ReferenceLine
+              key={r.y}
+              y={r.y}
+              stroke={r.color}
+              strokeDasharray="4 4"
+            />
+          ))}
+          {series.map((s) => (
+            <Line
+              key={s.key}
+              type="monotone"
+              dataKey={s.key}
+              name={s.label}
+              stroke={s.color}
+              strokeWidth={2}
+              dot={data.length <= 40 ? { r: 2 } : false}
+              connectNulls
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }

@@ -15,7 +15,15 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
-from .db import Activity, BodyRecord, DailyStat, SleepRecord, engine, init_db
+from .db import (
+    Activity,
+    BloodPressureReading,
+    BodyRecord,
+    DailyStat,
+    SleepRecord,
+    engine,
+    init_db,
+)
 from .queries import latest_summary
 from .sync import run_sync
 
@@ -110,6 +118,22 @@ def body(
             select(BodyRecord)
             .where(BodyRecord.date >= d0, BodyRecord.date <= d1)
             .order_by(BodyRecord.date)
+        ).all()
+    return rows
+
+
+@app.get("/api/blood_pressure")
+def blood_pressure(
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+):
+    """Individual blood-pressure readings; several may share one date."""
+    d0, d1 = (from_, to) if from_ and to else _default_range()
+    with Session(engine) as s:
+        rows = s.exec(
+            select(BloodPressureReading)
+            .where(BloodPressureReading.date >= d0, BloodPressureReading.date <= d1)
+            .order_by(BloodPressureReading.measured_at)
         ).all()
     return rows
 
