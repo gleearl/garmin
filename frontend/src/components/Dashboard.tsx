@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
+  BloodPressureReading,
   BodyRecord,
   DailyStat,
   SleepRecord,
@@ -15,20 +16,29 @@ import {
 } from "@/lib/api";
 import { Login } from "./Login";
 import {
+  bpCategory,
   fmtNum,
   metersToKm,
   paceMinPerKm,
   secsToH,
   secsToHours,
   shortDate,
+  shortDateTime,
   titleCase,
 } from "@/lib/format";
 import { StatCard, Panel } from "./Card";
-import { AreaTrend, LineTrend, StackedBars } from "./charts";
+import { AreaTrend, LineTrend, MultiLineTrend, StackedBars } from "./charts";
 import { Settings } from "./Settings";
 import Export from "./Export";
 
-type Tab = "overview" | "activities" | "sleep" | "daily" | "body" | "export";
+type Tab =
+  | "overview"
+  | "activities"
+  | "sleep"
+  | "daily"
+  | "body"
+  | "bp"
+  | "export";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -36,6 +46,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "sleep", label: "Sleep" },
   { id: "daily", label: "Daily Health" },
   { id: "body", label: "Body & Fitness" },
+  { id: "bp", label: "Blood Pressure" },
   { id: "export", label: "Export" },
 ];
 
@@ -61,6 +72,7 @@ export default function Dashboard() {
   const [sleep, setSleep] = useState<SleepRecord[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [body, setBody] = useState<BodyRecord[]>([]);
+  const [bp, setBp] = useState<BloodPressureReading[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,12 +85,13 @@ export default function Dashboard() {
     setError(null);
     const r = rangeParams(days);
     try {
-      const [s, d, sl, a, b, m] = await Promise.all([
+      const [s, d, sl, a, b, p, m] = await Promise.all([
         api.summary(),
         api.daily(r),
         api.sleep(r),
         api.activities(r),
         api.body(r),
+        api.blood_pressure(r),
         api.meta(),
       ]);
       setSummary(s);
@@ -86,6 +99,7 @@ export default function Dashboard() {
       setSleep(sl);
       setActivities(a);
       setBody(b);
+      setBp(p);
       setLastUpdated(m.last_updated);
     } catch (e) {
       if (isAuthError(e)) {
@@ -120,7 +134,11 @@ export default function Dashboard() {
 
   const hasData =
     summary &&
-    (summary.daily || daily.length || sleep.length || activities.length);
+    (summary.daily ||
+      daily.length ||
+      sleep.length ||
+      activities.length ||
+      bp.length);
 
   // Wait until we've checked stored auth, then gate live mode behind login.
   if (!authReady) return null;
@@ -128,8 +146,11 @@ export default function Dashboard() {
     return <Login onSuccess={() => setAuthed(true)} />;
   }
 
+  // w-full is load-bearing: body is a flex column, and `mx-auto` on a flex item
+  // disables stretch, so without it this box is shrink-to-fit and grows to the
+  // widest table's min-width instead of letting that table scroll on its own.
   return (
-    <div className="mx-auto max-w-6xl px-3 py-4 pb-24 sm:px-4 sm:py-6 md:pb-6">
+    <div className="mx-auto w-full max-w-6xl px-3 py-4 pb-24 sm:px-4 sm:py-6 md:pb-6">
       {/* Header */}
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -219,6 +240,7 @@ export default function Dashboard() {
           {tab === "sleep" && <Sleep sleep={sleep} />}
           {tab === "daily" && <Daily daily={daily} />}
           {tab === "body" && <Body body={body} />}
+          {tab === "bp" && <BloodPressure readings={bp} />}
         </>
       )}
 
@@ -289,6 +311,16 @@ function TabIcon({ id }: { id: Tab }) {
           <path d="M12 7v6m0 0-3 8m3-8 3 8M6 9l6 1 6-1" />
         </svg>
       );
+    case "bp":
+      // A gauge dial — reads as a BP monitor, and stays distinct from the
+      // activity zigzag and the daily-health heart.
+      return (
+        <svg {...common}>
+          <path d="M3.5 18a9 9 0 1 1 17 0" />
+          <circle cx="12" cy="14" r="1.6" />
+          <path d="m13.1 12.9 3-3.4" />
+        </svg>
+      );
     case "export":
       return (
         <svg {...common}>
@@ -337,7 +369,7 @@ function Overview({
   }));
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard
           label="Steps"
           value={fmtNum(summary.daily?.steps)}
@@ -370,6 +402,15 @@ function Overview({
           label="VO₂ Max"
           value={summary.vo2max?.vo2max ? fmtNum(summary.vo2max.vo2max, 1) : "—"}
           sub={shortDate(summary.vo2max?.date)}
+        />
+        <StatCard
+          label="Blood Pressure"
+          value={
+            summary.blood_pressure?.systolic
+              ? `${summary.blood_pressure.systolic}/${summary.blood_pressure.diastolic ?? "—"}`
+              : "—"
+          }
+          sub={<BpSub reading={summary.blood_pressure} />}
         />
       </div>
       <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
@@ -513,6 +554,162 @@ function Body({ body }: { body: BodyRecord[] }) {
         ) : (
           <p className="text-sm text-white/40">No BMI data in range.</p>
         )}
+      </Panel>
+    </div>
+  );
+}
+
+/** Sub-line for the overview card: the AHA category, colour-coded. */
+function BpSub({ reading }: { reading: BloodPressureReading | null }) {
+  if (!reading) return <>—</>;
+  const cat = bpCategory(reading.systolic, reading.diastolic);
+  return (
+    <span className="flex items-center gap-1.5">
+      {cat && (
+        <>
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{ background: cat.color }}
+          />
+          <span style={{ color: cat.color }}>{cat.short}</span>
+          {" · "}
+        </>
+      )}
+      {shortDate(reading.date)}
+    </span>
+  );
+}
+
+function BloodPressure({ readings }: { readings: BloodPressureReading[] }) {
+  if (!readings.length)
+    return (
+      <Panel title="Blood pressure">
+        <p className="text-sm text-white/40">
+          No blood-pressure readings in this range. Garmin only returns readings you
+          have logged in Garmin Connect (manually or from a paired BP monitor).
+        </p>
+      </Panel>
+    );
+
+  // Readings arrive oldest-first from the API; the table reads better newest-first.
+  const recent = [...readings].reverse();
+  const withBoth = readings.filter(
+    (r) => r.systolic != null && r.diastolic != null,
+  );
+  const avg = (pick: (r: BloodPressureReading) => number | null) => {
+    const vals = readings.map(pick).filter((v): v is number => v != null);
+    return vals.length
+      ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
+      : null;
+  };
+  const avgSys = avg((r) => r.systolic);
+  const avgDia = avg((r) => r.diastolic);
+  const avgCat = bpCategory(avgSys, avgDia);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard
+          label="Latest"
+          value={
+            recent[0].systolic
+              ? `${recent[0].systolic}/${recent[0].diastolic ?? "—"}`
+              : "—"
+          }
+          sub={shortDateTime(recent[0].measured_at)}
+        />
+        <StatCard
+          label="Average"
+          value={avgSys != null ? `${avgSys}/${avgDia ?? "—"}` : "—"}
+          sub={
+            avgCat ? (
+              <span style={{ color: avgCat.color }}>{avgCat.label}</span>
+            ) : (
+              "mmHg"
+            )
+          }
+        />
+        <StatCard label="Avg pulse" value={avg((r) => r.pulse) ?? "—"} sub="bpm" />
+        <StatCard
+          label="Readings"
+          value={readings.length}
+          sub={`${withBoth.length} complete`}
+        />
+      </div>
+
+      <Panel title="Systolic / diastolic (mmHg)">
+        <MultiLineTrend
+          data={readings}
+          xKey="measured_at"
+          xFormatter={shortDateTime}
+          unit=" mmHg"
+          series={[
+            { key: "systolic", color: "#f87171", label: "Systolic" },
+            { key: "diastolic", color: "#60a5fa", label: "Diastolic" },
+          ]}
+          refLines={[
+            // Dashed guides at the 120/80 "normal" thresholds.
+            { y: 120, color: "#f8717166" },
+            { y: 80, color: "#60a5fa66" },
+          ]}
+        />
+      </Panel>
+
+      <Panel title="Pulse at measurement (bpm)">
+        <MultiLineTrend
+          data={readings}
+          xKey="measured_at"
+          xFormatter={shortDateTime}
+          unit=" bpm"
+          series={[{ key: "pulse", color: "#34d399", label: "Pulse" }]}
+        />
+      </Panel>
+
+      <Panel title={`Readings (${readings.length})`}>
+        <div className="-mx-3 overflow-x-auto px-3 sm:mx-0 sm:px-0">
+          <table className="w-full min-w-[32rem] text-sm">
+            <thead>
+              <tr className="text-left text-white/40">
+                <th className="py-2 pr-4 font-medium">When</th>
+                <th className="py-2 pr-4 font-medium">Reading</th>
+                <th className="py-2 pr-4 font-medium">Pulse</th>
+                <th className="py-2 pr-4 font-medium">Category</th>
+                <th className="py-2 pr-4 font-medium">Source</th>
+                <th className="py-2 pr-4 font-medium">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recent.map((r) => {
+                const cat = bpCategory(r.systolic, r.diastolic);
+                return (
+                  <tr key={r.measured_at} className="border-t border-white/5">
+                    <td className="py-2 pr-4 text-white/70">
+                      {r.measured_at.slice(0, 10)}{" "}
+                      <span className="text-white/40">
+                        {r.measured_at.slice(11, 16)}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">
+                      {r.systolic ?? "—"}/{r.diastolic ?? "—"}
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">{r.pulse ?? "—"}</td>
+                    <td className="py-2 pr-4">
+                      {cat ? (
+                        <span style={{ color: cat.color }}>{cat.label}</span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="py-2 pr-4 text-white/50">
+                      {titleCase(r.source_type)}
+                    </td>
+                    <td className="py-2 pr-4 text-white/50">{r.notes || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </Panel>
     </div>
   );

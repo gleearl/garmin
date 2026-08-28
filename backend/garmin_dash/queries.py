@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from sqlmodel import Session, select
 
-from .db import Activity, BodyRecord, DailyStat, SleepRecord
+from .db import (
+    Activity,
+    BloodPressureReading,
+    BodyRecord,
+    DailyStat,
+    SleepRecord,
+)
 
 
 def latest_summary(session: Session) -> dict:
@@ -24,11 +30,15 @@ def latest_summary(session: Session) -> dict:
         .where(BodyRecord.vo2max.is_not(None))
         .order_by(BodyRecord.date.desc())
     ).first()
+    latest_bp = session.exec(
+        select(BloodPressureReading).order_by(BloodPressureReading.measured_at.desc())
+    ).first()
     n_activities = len(session.exec(select(Activity.id)).all())
     return {
         "daily": latest_daily,
         "sleep": latest_sleep,
         "weight": latest_weight,
         "vo2max": latest_vo2,
+        "blood_pressure": latest_bp,
         "activity_count": n_activities,
     }

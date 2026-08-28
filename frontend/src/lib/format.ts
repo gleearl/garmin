@@ -30,3 +30,25 @@ export const titleCase = (s: string | null | undefined) =>
     : s
         .replace(/_/g, " ")
         .replace(/\b\w/g, (c) => c.toUpperCase());
+
+// Blood-pressure readings are timestamped, not daily — show the day plus time.
+export const shortDateTime = (d: string | null | undefined) =>
+  d == null ? "—" : d.length > 10 ? `${d.slice(5, 10)} ${d.slice(11, 16)}` : d.slice(5);
+
+/** AHA blood-pressure category for a reading (the higher of the two wins).
+ *  ``short`` is for the narrow overview card, where the full label wraps. */
+export const bpCategory = (
+  systolic: number | null | undefined,
+  diastolic: number | null | undefined,
+): { label: string; short: string; color: string } | null => {
+  if (systolic == null || diastolic == null) return null;
+  if (systolic >= 180 || diastolic >= 120)
+    return { label: "Hypertensive crisis", short: "Crisis", color: "#ef4444" };
+  if (systolic >= 140 || diastolic >= 90)
+    return { label: "Stage 2 hypertension", short: "Stage 2", color: "#f87171" };
+  if (systolic >= 130 || diastolic >= 80)
+    return { label: "Stage 1 hypertension", short: "Stage 1", color: "#fb923c" };
+  if (systolic >= 120)
+    return { label: "Elevated", short: "Elevated", color: "#facc15" };
+  return { label: "Normal", short: "Normal", color: "#34d399" };
+};

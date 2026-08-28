@@ -71,6 +71,23 @@ class BodyRecord(SQLModel, table=True):
     vo2max: float | None = None
 
 
+class BloodPressureReading(SQLModel, table=True):
+    """A single blood-pressure measurement.
+
+    Unlike the daily rollups, several readings can share one calendar date, so
+    the primary key is the local measurement timestamp. ``date`` is stored
+    alongside it so range filters look the same as every other table.
+    """
+
+    measured_at: str = Field(primary_key=True)  # YYYY-MM-DDTHH:MM:SS (local)
+    date: str = Field(index=True)  # YYYY-MM-DD
+    systolic: int | None = None
+    diastolic: int | None = None
+    pulse: int | None = None
+    source_type: str | None = None
+    notes: str | None = None
+
+
 def init_db() -> None:
     """Create all tables if they do not yet exist."""
     SQLModel.metadata.create_all(engine)

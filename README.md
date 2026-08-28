@@ -1,7 +1,8 @@
 # Garmin Dashboard
 
 A local dashboard for your personal Garmin Connect data — activities, sleep, daily
-health (steps, resting HR, stress, Body Battery), and body/fitness (weight, VO₂ max).
+health (steps, resting HR, stress, Body Battery), body/fitness (weight, VO₂ max), and
+blood pressure.
 
 - **Backend** (`backend/`): Python + FastAPI. Logs into Garmin Connect via the unofficial
   [`garminconnect`](https://github.com/cyberjunky/python-garminconnect) library, caches your
@@ -43,8 +44,8 @@ uv run python -m garmin_dash.sync --days 90
 uv run uvicorn garmin_dash.app:app --reload
 ```
 
-API endpoints: `GET /api/{summary,daily,sleep,activities,body}` and `POST /api/sync?days=N`.
-All accept optional `?from=YYYY-MM-DD&to=YYYY-MM-DD`.
+API endpoints: `GET /api/{summary,daily,sleep,activities,body,blood_pressure}` and
+`POST /api/sync?days=N`. All accept optional `?from=YYYY-MM-DD&to=YYYY-MM-DD`.
 
 ## Frontend
 
@@ -67,7 +68,8 @@ backend/
   garmin_dash/
     login.py     one-time interactive login (MFA), persists tokens
     client.py    garminconnect wrapper + token store handling
-    db.py        SQLite schema (SQLModel): DailyStat, SleepRecord, Activity, BodyRecord
+    db.py        SQLite schema (SQLModel): DailyStat, SleepRecord, Activity,
+                 BodyRecord, BloodPressureReading
     sync.py      fetch a date range from Garmin -> upsert into SQLite (CLI + used by API)
     app.py       FastAPI endpoints reading from the cache
 frontend/

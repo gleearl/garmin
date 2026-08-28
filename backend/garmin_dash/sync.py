@@ -24,7 +24,15 @@ from garminconnect import GarminConnectTooManyRequestsError
 from sqlmodel import Session
 
 from .client import get_client
-from .db import Activity, BodyRecord, DailyStat, SleepRecord, engine, init_db
+from .db import (
+    Activity,
+    BloodPressureReading,
+    BodyRecord,
+    DailyStat,
+    SleepRecord,
+    engine,
+    init_db,
+)
 
 
 class RateLimited(Exception):
@@ -224,6 +232,56 @@ def sync_activities(client, session: Session, start: str, end: str) -> None:
         )
 
 
+def _bp_measurements(payload) -> list[dict]:
+    """Flatten Garmin's blood-pressure range payload into individual readings.
+
+    The documented shape nests each day as
+    ``{"measurementSummaries": [{"measurementSummary": {"measurements": [...]}}]}``
+    but responses have been seen without the inner wrapper, so accept either.
+    """
+    out: list[dict] = []
+    if not isinstance(payload, dict):
+        return out
+    for day in payload.get("measurementSummaries") or []:
+        summary = day.get("measurementSummary") if isinstance(day, dict) else None
+        if not isinstance(summary, dict):
+            summary = day if isinstance(day, dict) else {}
+        for m in summary.get("measurements") or []:
+            if isinstance(m, dict):
+                out.append(m)
+    return out
+
+
+def _bp_timestamp(m: dict) -> str | None:
+    """Normalise Garmin's ``2022-09-14T09:13:51.0`` to a stable second-resolution key."""
+    ts = m.get("measurementTimestampLocal") or m.get("measurementTimestampGMT")
+    if not isinstance(ts, str) or len(ts) < 10:
+        return None
+    return ts[:19]
+
+
+def sync_blood_pressure(client, session: Session, start: str, end: str) -> None:
+    bp = _fetch("blood pressure", client.get_blood_pressure, start, end)
+    if not bp:
+        return
+    for m in _bp_measurements(bp):
+        ts = _bp_timestamp(m)
+        if not ts or m.get("systolic") is None:
+            continue
+        _upsert(
+            session,
+            BloodPressureReading(
+                measured_at=ts,
+                date=ts[:10],
+                systolic=m.get("systolic"),
+                diastolic=m.get("diastolic"),
+                pulse=m.get("pulse"),
+                source_type=m.get("sourceType"),
+                notes=m.get("notes") or None,
+            ),
+        )
+
+
 def run_sync(
     days: int = 90,
     start: str | None = None,
@@ -279,6 +337,7 @@ def run_sync(
             # Range endpoints (single calls; cheap relative to the per-day loop).
             sync_body(client, session, start_s, end_s)
             sync_activities(client, session, start_s, end_s)
+            sync_blood_pressure(client, session, start_s, end_s)
             session.commit()
         except RateLimited as rl:
             session.commit()

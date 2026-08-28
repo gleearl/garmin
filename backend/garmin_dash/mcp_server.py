@@ -90,6 +90,14 @@ def body(from_date: str | None = None, to_date: str | None = None) -> str:
     return _get("/api/garmin/body", {"from": from_date, "to": to_date})
 
 
+@mcp.tool()
+def blood_pressure(from_date: str | None = None, to_date: str | None = None) -> str:
+    """Blood-pressure readings: systolic, diastolic, pulse, source_type and notes,
+    each stamped with measured_at (local) and date. Several readings can share a
+    date. Dates are YYYY-MM-DD; omit both for the last ~90 days."""
+    return _get("/api/garmin/blood_pressure", {"from": from_date, "to": to_date})
+
+
 def main() -> None:
     mcp.run()
 

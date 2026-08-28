@@ -115,11 +115,22 @@ export interface BodyRecord {
   vo2max: number | null;
 }
 
+export interface BloodPressureReading {
+  measured_at: string; // YYYY-MM-DDTHH:MM:SS (local)
+  date: string;
+  systolic: number | null;
+  diastolic: number | null;
+  pulse: number | null;
+  source_type: string | null;
+  notes: string | null;
+}
+
 export interface Summary {
   daily: DailyStat | null;
   sleep: SleepRecord | null;
   weight: BodyRecord | null;
   vo2max: BodyRecord | null;
+  blood_pressure: BloodPressureReading | null;
   activity_count: number;
 }
 
@@ -222,5 +233,19 @@ export const api = {
       return filterByDate(all, r?.from, r?.to);
     }
     return get<BodyRecord[]>(`${base}/api/garmin/body${liveRange(r)}`);
+  },
+
+  blood_pressure: async (r?: {
+    from?: string;
+    to?: string;
+  }): Promise<BloodPressureReading[]> => {
+    const base = getBase();
+    if (STATIC_MODE) {
+      const all = await get<BloodPressureReading[]>(`${base}/blood_pressure.json`);
+      return filterByDate(all, r?.from, r?.to);
+    }
+    return get<BloodPressureReading[]>(
+      `${base}/api/garmin/blood_pressure${liveRange(r)}`,
+    );
   },
 };

@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { downloadCSV, toCSV } from "@/lib/csv";
 import { Panel } from "./Card";
 
-type DatasetKey = "daily" | "sleep" | "activities" | "body";
+type DatasetKey = "daily" | "sleep" | "activities" | "body" | "blood_pressure";
 
 const COLUMNS: Record<DatasetKey, string[]> = {
   daily: [
@@ -21,6 +21,9 @@ const COLUMNS: Record<DatasetKey, string[]> = {
     "max_hr", "calories", "avg_speed_mps", "elevation_gain_m",
   ],
   body: ["date", "weight_kg", "body_fat_pct", "bmi", "vo2max"],
+  blood_pressure: [
+    "measured_at", "date", "systolic", "diastolic", "pulse", "source_type", "notes",
+  ],
 };
 
 const FETCHERS: Record<
@@ -31,6 +34,7 @@ const FETCHERS: Record<
   sleep: api.sleep,
   activities: api.activities,
   body: api.body,
+  blood_pressure: api.blood_pressure,
 };
 
 const DATASET_LABELS: Record<DatasetKey, string> = {
@@ -38,6 +42,7 @@ const DATASET_LABELS: Record<DatasetKey, string> = {
   sleep: "Sleep",
   activities: "Activities",
   body: "Body & fitness",
+  blood_pressure: "Blood pressure",
 };
 
 const MONTHS = [
@@ -98,7 +103,9 @@ export default function Export() {
     setErr(null);
     setMsg(null);
     const keys: DatasetKey[] =
-      dataset === "all" ? ["daily", "sleep", "activities", "body"] : [dataset];
+      dataset === "all"
+        ? ["daily", "sleep", "activities", "body", "blood_pressure"]
+        : [dataset];
     try {
       let totalRows = 0;
       let files = 0;
