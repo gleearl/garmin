@@ -5,6 +5,23 @@ on:
     # Every 6 hours: 00:00, 06:00, 12:00, 18:00 UTC
     - cron: "0 */6 * * *"
   workflow_dispatch:
+    # A manual run can widen the window. The schedule only ever fetches the last
+    # 7 days, so a metric added to the collector after the fact (blood pressure)
+    # starts with 7 days of history and never grows backwards -- readings older
+    # than that first BP-capable run stay invisible forever. These inputs are the
+    # backfill lever, and they have to run here rather than on a laptop: Garmin
+    # rotates the refresh token on every refresh, so the store round-tripped
+    # through IONOS is the only live one.
+    inputs:
+      days:
+        description: "Days of history ending today (ignored when start is set)"
+        default: "7"
+      start:
+        description: "Backfill start date YYYY-MM-DD (leave blank for a normal run)"
+        default: ""
+      end:
+        description: "Backfill end date YYYY-MM-DD (defaults to today)"
+        default: ""
 
 jobs:
   sync:
@@ -71,15 +88,34 @@ jobs:
             echo "No token store on IONOS yet; seeding from GARMIN_TOKEN_BASE64."
           fi
 
-      - name: Sync last 7 days from Garmin
+      - name: Sync from Garmin
         env:
           # Bootstrap only. Used when IONOS has no token store yet; once one is
           # persisted there it takes precedence, because this secret is a fixed
           # snapshot whose refresh token Garmin rotates away.
           GARMIN_TOKEN_BASE64: ${{ secrets.GARMIN_TOKEN_BASE64 }}
           GARMIN_DB: garmin.db
+          # Empty on a scheduled run, so this falls through to --days 7.
+          SYNC_DAYS: ${{ inputs.days || '7' }}
+          SYNC_START: ${{ inputs.start }}
+          SYNC_END: ${{ inputs.end }}
         working-directory: backend
-        run: uv run python -m garmin_dash.sync --days 7
+        run: |
+          set -euo pipefail
+          if [ -n "${SYNC_START:-}" ]; then
+            # Backfill. --skip-existing makes the per-day loop cheap (days already
+            # in the restored DB cost nothing), so the real work is the one-shot
+            # range calls -- body, activities and blood pressure -- which refetch
+            # the whole span and are exactly what fills in missing history.
+            args=(--start "$SYNC_START" --skip-existing --delay 1)
+            if [ -n "${SYNC_END:-}" ]; then
+              args+=(--end "$SYNC_END")
+            fi
+          else
+            args=(--days "${SYNC_DAYS:-7}")
+          fi
+          echo "Running: sync ${args[*]}"
+          uv run python -m garmin_dash.sync "${args[@]}"
 
       # Persist the token store before anything else can fail. The sync above
       # rotates the refresh token, which invalidates the copy on IONOS the
